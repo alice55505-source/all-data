@@ -1,5 +1,5 @@
 {
-  "name": "all-children",
+  "name": "all-data",
   "private": true,
   "scripts": {
     "dev": "wrangler pages dev .",
