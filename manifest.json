@@ -1,6 +1,6 @@
 {
-  "name": "全台專項統計產生器",
-  "short_name": "專項統計",
+  "name": "all統計",
+  "short_name": "all統計",
   "description": "上傳各召會週報，計算兒童與青職各項每週平均與全台總計",
   "start_url": "./index.html",
   "scope": "./",
