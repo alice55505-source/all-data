@@ -4,15 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>all統計</title>
-<meta name="description" content="上傳各召會週報，計算兒童與青職各項每週平均，並彙總全台總計" />
+<meta name="description" content="上傳各召會週報，自訂勾選要統計的聚會與身份組合，計算每週平均並彙總全台總計" />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://all-children.pages.dev/" />
 <meta property="og:title" content="all統計" />
-<meta property="og:description" content="上傳各召會週報，計算兒童與青職各項每週平均，並彙總全台總計" />
+<meta property="og:description" content="上傳各召會週報，自訂勾選要統計的聚會與身份組合，計算每週平均並彙總全台總計" />
 <meta property="og:image" content="https://all-children.pages.dev/icons/icon-512.png" />
 <meta name="twitter:card" content="summary" />
 <meta name="twitter:title" content="all統計" />
-<meta name="twitter:description" content="上傳各召會週報，計算兒童與青職各項每週平均，並彙總全台總計" />
+<meta name="twitter:description" content="上傳各召會週報，自訂勾選要統計的聚會與身份組合，計算每週平均並彙總全台總計" />
 <meta name="twitter:image" content="https://all-children.pages.dev/icons/icon-512.png" />
 <meta name="theme-color" content="#2563eb" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -30,9 +30,12 @@
     <div class="app-header-row">
       <div>
         <h1>all統計</h1>
-        <p>上傳各召會週報，自動算出各項每週平均，並彙總全台總計。</p>
+        <p>上傳各召會週報，自訂勾選要統計的聚會與身份組合，自動算出每週平均並彙總全台總計。</p>
       </div>
-      <button class="btn-secondary settings-btn" id="open-settings-btn" style="display:none;">⚙ 設定召會</button>
+      <div class="header-btn-row">
+        <button class="btn-secondary settings-btn" id="open-metrics-settings-btn" style="display:none;">⚙ 設定統計欄位</button>
+        <button class="btn-secondary settings-btn" id="open-settings-btn" style="display:none;">⚙ 設定召會</button>
+      </div>
     </div>
   </header>
 
@@ -68,7 +71,7 @@
   <div id="app-main" style="display:none;">
 
   <section class="card">
-    <h2>1. 上傳報表 <span class="badge">選擇召會後上傳，一次算出兒童＋青職</span></h2>
+    <h2>1. 上傳報表 <span class="badge">選擇召會後上傳，套用目前設定的統計欄位</span></h2>
 
     <div class="field">
       <label for="congregation-select">召會</label>
@@ -92,86 +95,41 @@
     <div class="status-msg" id="status-msg"></div>
   </section>
 
-  <nav class="tab-nav">
-    <button class="tab-btn active" data-tab-target="children">兒童</button>
-    <button class="tab-btn" data-tab-target="youth">青職</button>
-  </nav>
+  <section class="card">
+    <h2>2. 上傳進度</h2>
+    <div class="progress-row">
+      <span>已上傳召會</span>
+      <span class="progress-count"><span id="stats-progress-count">0</span> / <span id="stats-progress-total">28</span></span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="stats-progress-bar" style="width:0%"></div>
+    </div>
+    <div class="chip-grid" id="stats-chip-grid"></div>
+  </section>
 
-  <div data-tab-panel="children">
-    <section class="card">
-      <h2>2. 上傳進度</h2>
-      <div class="progress-row">
-        <span>已上傳召會</span>
-        <span class="progress-count"><span id="children-progress-count">0</span> / <span id="children-progress-total">28</span></span>
-      </div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" id="children-progress-bar" style="width:0%"></div>
-      </div>
-      <div class="chip-grid" id="children-chip-grid"></div>
-    </section>
+  <section class="card">
+    <h2>3. 各召會結果 <span class="badge">依區域分組，區域列為該區總計</span></h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr id="stats-results-thead-row"></tr></thead>
+        <tbody id="stats-results-tbody"></tbody>
+      </table>
+    </div>
+    <div class="empty-hint" id="stats-results-empty">尚未上傳任何召會的資料</div>
+    <div class="card-actions">
+      <button class="btn-secondary" id="stats-download-btn" disabled>下載 Excel</button>
+    </div>
+  </section>
 
-    <section class="card">
-      <h2>3. 各召會結果 <span class="badge">依區域分組，區域列為該區總計</span></h2>
-      <div class="table-scroll">
-        <table>
-          <thead><tr id="children-results-thead-row"></tr></thead>
-          <tbody id="children-results-tbody"></tbody>
-        </table>
-      </div>
-      <div class="empty-hint" id="children-results-empty">尚未上傳任何召會的資料</div>
-      <div class="card-actions">
-        <button class="btn-secondary" id="children-download-btn" disabled>下載 Excel</button>
-      </div>
-    </section>
+  <section class="card">
+    <h2>4. 全台總計</h2>
+    <div class="summary-grid" id="stats-summary-grid"></div>
+    <div class="summary-warn" id="stats-summary-warn" style="display:none;"></div>
+  </section>
 
-    <section class="card">
-      <h2>4. 全台總計</h2>
-      <div class="summary-grid" id="children-summary-grid"></div>
-      <div class="summary-warn" id="children-summary-warn" style="display:none;"></div>
-    </section>
-
-    <p class="tab-footnote">
-      主日 =「週報網格」最後「兒童」小計欄 +「主日」類別的「國小」欄；召會生活、小排皆為「學齡前」+「國小」的每週平均。
-    </p>
-  </div>
-
-  <div data-tab-panel="youth" style="display:none;">
-    <section class="card">
-      <h2>2. 上傳進度</h2>
-      <div class="progress-row">
-        <span>已上傳召會</span>
-        <span class="progress-count"><span id="youth-progress-count">0</span> / <span id="youth-progress-total">28</span></span>
-      </div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" id="youth-progress-bar" style="width:0%"></div>
-      </div>
-      <div class="chip-grid" id="youth-chip-grid"></div>
-    </section>
-
-    <section class="card">
-      <h2>3. 各召會結果 <span class="badge">依區域分組，區域列為該區總計</span></h2>
-      <div class="table-scroll">
-        <table>
-          <thead><tr id="youth-results-thead-row"></tr></thead>
-          <tbody id="youth-results-tbody"></tbody>
-        </table>
-      </div>
-      <div class="empty-hint" id="youth-results-empty">尚未上傳任何召會的資料</div>
-      <div class="card-actions">
-        <button class="btn-secondary" id="youth-download-btn" disabled>下載 Excel</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>4. 全台總計</h2>
-      <div class="summary-grid" id="youth-summary-grid"></div>
-      <div class="summary-warn" id="youth-summary-warn" style="display:none;"></div>
-    </section>
-
-    <p class="tab-footnote">
-      主日、家聚會（出訪+受訪）、小排、生命讀經皆為「週報網格」分頁中「青職」欄位的每週平均值。
-    </p>
-  </div>
+  <p class="tab-footnote">
+    以上每個欄位皆為「週報網格」分頁中對應「聚會類別｜身份」的每週平均值（家聚會（出訪+受訪）為出訪、受訪兩欄相加）；要新增或調整欄位請點右上角「⚙ 設定統計欄位」。
+  </p>
 
   <footer class="app-footer">
     全台總計為已上傳召會之數值加總。資料儲存在這個房間專屬的雲端資料庫，只有知道房間代碼的人看得到。
@@ -183,7 +141,7 @@
 <div class="modal-backdrop" id="settings-backdrop" style="display:none;">
   <div class="modal">
     <h2>設定召會清單</h2>
-    <p class="modal-hint">區域名稱獨立一行，該區底下的召會每行一個並加上縮排（空格），兩個分頁（兒童／青職）共用同一份清單。</p>
+    <p class="modal-hint">區域名稱獨立一行，該區底下的召會每行一個並加上縮排（空格）。</p>
     <textarea id="settings-textarea" rows="14" placeholder="例如：
 雲東區
   斗六
@@ -199,6 +157,46 @@
       <div class="modal-actions-right">
         <button class="btn-secondary" id="settings-cancel-btn">取消</button>
         <button class="btn-primary" id="settings-save-btn">儲存並套用</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="metrics-settings-backdrop" style="display:none;">
+  <div class="modal">
+    <h2>設定統計欄位</h2>
+    <p class="modal-hint">勾選要統計的「聚會」和「身份／年齡層」，程式會把勾選的聚會 × 身份全部組合都算成一個欄位（例如同時勾主日、小排和學齡前、國小，就會出現「主日－學齡前」「主日－國小」「小排－學齡前」「小排－國小」四個欄位）；「額外」是不需要交叉組合的獨立欄位。設定套用給這個房間所有人。</p>
+
+    <div class="field">
+      <label>快速選擇</label>
+      <div class="card-actions" style="margin-top:0;">
+        <button type="button" class="btn-secondary" id="metrics-preset-children-btn">全台兒童</button>
+        <button type="button" class="btn-secondary" id="metrics-preset-youth-btn">全台青職</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>聚會選擇</label>
+      <div class="checkbox-grid" id="metrics-meeting-options"></div>
+    </div>
+
+    <div class="field">
+      <label>Role 群組</label>
+      <div class="checkbox-grid" id="metrics-role-options"></div>
+    </div>
+
+    <div class="field">
+      <label>額外</label>
+      <div class="checkbox-grid" id="metrics-extra-options"></div>
+      <p class="modal-hint" style="margin-top:0.4rem;">兒童主日 = 「兒童」小計欄 + 「主日」類別的「國小」欄。</p>
+    </div>
+
+    <p class="modal-hint" id="metrics-settings-count"></p>
+    <div class="modal-actions">
+      <button class="btn-secondary" id="metrics-settings-clear-btn">清空全部</button>
+      <div class="modal-actions-right">
+        <button class="btn-secondary" id="metrics-settings-cancel-btn">取消</button>
+        <button class="btn-primary" id="metrics-settings-save-btn">儲存並套用</button>
       </div>
     </div>
   </div>

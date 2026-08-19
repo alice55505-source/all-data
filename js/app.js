@@ -10,6 +10,93 @@
   ];
   var DEFAULT_REGION_NAME = "未分區";
 
+  // ---- 統計欄位選項（打勾多選：聚會 × 身份 交叉組合，額外欄位另計）----
+
+  var MEETING_OPTIONS = [
+    "主日", "禱告", "家聚會出訪", "家聚會受訪", "家聚會（出訪+受訪）",
+    "小排", "晨興", "福音出訪", "生命讀經", "今年受浸", "召會生活"
+  ];
+  var ROLE_OPTIONS = ["學齡前", "國小", "國中", "高中", "大學", "青職", "青壯", "中壯", "年長", "兒童"];
+  var EXTRA_OPTIONS = ["兒童主日"];
+  var DEFAULT_METRICS_CONFIG = { meetings: [], roles: [], extras: [] };
+
+  function normalizeStringList(arr, allowed) {
+    if (!Array.isArray(arr)) return [];
+    var seen = {};
+    var out = [];
+    arr.forEach(function (v) {
+      var s = typeof v === "string" ? v.trim() : "";
+      if (!s || seen[s] || allowed.indexOf(s) === -1) return;
+      seen[s] = true;
+      out.push(s);
+    });
+    return out;
+  }
+
+  function normalizeMetricsConfig(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    return {
+      meetings: normalizeStringList(raw.meetings, MEETING_OPTIONS),
+      roles: normalizeStringList(raw.roles, ROLE_OPTIONS),
+      extras: normalizeStringList(raw.extras, EXTRA_OPTIONS)
+    };
+  }
+
+  // 「家聚會（出訪+受訪）」是虛擬聚會類別，「兒童」是虛擬 Role 群組，
+  // 兩者都是把底下的實際類別/身份值相加；勾到虛擬 × 虛擬也能正確展開。
+  function resolveMeetings(meeting) {
+    return meeting === "家聚會（出訪+受訪）" ? ["家聚會出訪", "家聚會受訪"] : [meeting];
+  }
+
+  function resolveRoles(role) {
+    return role === "兒童" ? ["學齡前", "國小"] : [role];
+  }
+
+  function meetingRoleValue(sums, meeting, role) {
+    var total = 0;
+    resolveMeetings(meeting).forEach(function (m) {
+      resolveRoles(role).forEach(function (r) {
+        total += sums[m + "|" + r] || 0;
+      });
+    });
+    return total;
+  }
+
+  function extraValue(sums, extraKey) {
+    if (extraKey === "兒童主日") return (sums["兒童|小計"] || 0) + (sums["主日|國小"] || 0);
+    return 0;
+  }
+
+  // 快速選擇：套用一組常用的聚會×身份組合，對應原本固定的「兒童」「青職」分頁。
+  var QUICK_PRESETS = {
+    children: { meetings: ["召會生活", "小排"], roles: ["學齡前", "國小"], extras: ["兒童主日"] },
+    youth: { meetings: ["主日", "家聚會（出訪+受訪）", "小排", "生命讀經"], roles: ["青職"], extras: [] }
+  };
+
+  function buildMetricsFromConfig(config) {
+    var metrics = [];
+    config.meetings.forEach(function (meeting) {
+      config.roles.forEach(function (role) {
+        var label = meeting + "－" + role;
+        metrics.push({
+          key: "mr__" + meeting + "__" + role,
+          label: label + "（週平均）",
+          totalLabel: label + " 總計",
+          value: function (sums) { return meetingRoleValue(sums, meeting, role); }
+        });
+      });
+    });
+    config.extras.forEach(function (extraKey) {
+      metrics.push({
+        key: "extra__" + extraKey,
+        label: extraKey + "（週平均）",
+        totalLabel: extraKey + " 總計",
+        value: function (sums) { return extraValue(sums, extraKey); }
+      });
+    });
+    return metrics;
+  }
+
   function normalizeGroups(raw) {
     if (!Array.isArray(raw)) return null;
     var seen = {};
@@ -40,6 +127,7 @@
 
   var CONGREGATION_GROUPS = [];
   var CONGREGATIONS = [];
+  var METRICS_CONFIG = DEFAULT_METRICS_CONFIG;
   var dataState = {};
   var ROOM_ID = null;
 
@@ -106,6 +194,17 @@
     });
   }
 
+  function apiSaveMetrics(id, metrics) {
+    return fetch("/api/rooms/" + encodeURIComponent(id) + "/metrics", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metrics)
+    }).then(function (res) {
+      if (!res.ok) throw new Error("儲存失敗，請檢查網路連線");
+      return res.json();
+    });
+  }
+
   function apiUpsertCongregation(id, name, entry) {
     return fetch("/api/rooms/" + encodeURIComponent(id) + "/congregations/" + encodeURIComponent(name), {
       method: "PUT",
@@ -155,7 +254,7 @@
     window.location.href = url.toString();
   }
 
-  // ---- 週報網格：一次掃描，兒童／青職共用 ----
+  // ---- 週報網格：一次掃描出每個「類別｜身份」的每週平均值 ----
 
   var GRID_SHEET_NAME = "週報網格";
   var GRID_WEEK_PATTERN = /^\d+W\d+$/;
@@ -324,33 +423,12 @@
     return { weeks: weeksCount, sums: sums };
   }
 
-  function deriveChildrenResult(scan) {
-    var get = function (cat, age) { return scan.sums[cat + "|" + age] || 0; };
-    return {
-      weeks: scan.weeks,
-      avgSunday: get("兒童", "小計") + get("主日", "國小"),
-      avgGroup: get("小排", "學齡前") + get("小排", "國小"),
-      avgLife: get("召會生活", "學齡前") + get("召會生活", "國小")
-    };
-  }
+  // ---- 統計區塊（進度／表格／總計）算繪工廠：欄位由 METRICS_CONFIG 動態決定 ----
 
-  function deriveYouthResult(scan) {
-    var get = function (cat, age) { return scan.sums[cat + "|" + age] || 0; };
-    return {
-      weeks: scan.weeks,
-      avgSunday: get("主日", "青職"),
-      avgFamily: get("家聚會出訪", "青職") + get("家聚會受訪", "青職"),
-      avgGroup: get("小排", "青職"),
-      avgLifeReading: get("生命讀經", "青職")
-    };
-  }
-
-  // ---- 共用區塊（進度／表格／總計）算繪工廠 ----
-
-  function createSection(cfg) {
+  function createStatsSection(cfg) {
     var prefix = cfg.prefix;
-    var metrics = cfg.metrics;
-    var extract = cfg.extract;
+    var summaryTitle = cfg.summaryTitle;
+    var fileBaseName = cfg.fileBaseName;
 
     function id(name) { return document.getElementById(prefix + "-" + name); }
 
@@ -366,6 +444,8 @@
       summaryGrid: id("summary-grid"),
       summaryWarn: id("summary-warn")
     };
+
+    var metrics = [];
 
     function initTableHeader() {
       var html = "<th>召會 / 區域</th><th>週數</th>";
@@ -401,6 +481,10 @@
       els.progressBar.style.width = (CONGREGATIONS.length ? (uploadedCount / CONGREGATIONS.length * 100) : 0) + "%";
     }
 
+    function metricValue(entry, m) {
+      return m.value(entry && entry.sums ? entry.sums : {});
+    }
+
     function regionTotalRow(entries) {
       // 週數 stays a mean (it's informational context, not one of the
       // stats being reported); every actual metric column is a straight
@@ -411,7 +495,7 @@
       if (!entries.length) return total;
       total.weeks = entries.reduce(function (acc, d) { return acc + d.weeks; }, 0) / entries.length;
       metrics.forEach(function (m) {
-        total[m.key] = entries.reduce(function (acc, d) { return acc + (d[m.key] || 0); }, 0);
+        total[m.key] = entries.reduce(function (acc, d) { return acc + metricValue(d, m); }, 0);
       });
       return total;
     }
@@ -423,9 +507,9 @@
           return Object.prototype.hasOwnProperty.call(state, name);
         });
         if (!uploaded.length) return;
-        var entries = uploaded.map(function (name) { return extract(state[name]); });
+        var entries = uploaded.map(function (name) { return state[name]; });
         uploaded.forEach(function (name) {
-          out.push({ type: "congregation", name: name, data: extract(state[name]) });
+          out.push({ type: "congregation", name: name, data: state[name] });
         });
         out.push({ type: "region", region: group.region, data: regionTotalRow(entries) });
       });
@@ -437,6 +521,9 @@
       var rowsData = buildRows(state);
 
       els.resultsEmpty.style.display = rowsData.length ? "none" : "block";
+      els.resultsEmpty.textContent = metrics.length
+        ? "尚未上傳任何召會的資料"
+        : "尚未選擇任何統計欄位，請點右上角「⚙ 設定統計欄位」勾選要看的聚會與身份";
       els.downloadBtn.disabled = !rowsData.length;
 
       rowsData.forEach(function (r) {
@@ -449,7 +536,7 @@
           html += "<td></td>";
         } else {
           html = "<td class=\"congregation-name\">" + r.name + "</td><td>" + r.data.weeks + "</td>";
-          metrics.forEach(function (m) { html += "<td>" + formatNum(r.data[m.key]) + "</td>"; });
+          metrics.forEach(function (m) { html += "<td>" + formatNum(metricValue(r.data, m)) + "</td>"; });
           html += "<td><button class=\"btn-danger-ghost\" data-remove=\"" + r.name + "\">移除</button></td>";
         }
         tr.innerHTML = html;
@@ -467,8 +554,8 @@
       var totals = {};
       metrics.forEach(function (m) { totals[m.key] = 0; });
       Object.keys(state).forEach(function (name) {
-        var d = extract(state[name]);
-        metrics.forEach(function (m) { totals[m.key] += d[m.key] || 0; });
+        var d = state[name];
+        metrics.forEach(function (m) { totals[m.key] += metricValue(d, m); });
       });
 
       metrics.forEach(function (m) {
@@ -498,20 +585,24 @@
       rowsData.forEach(function (r) {
         var label = r.type === "region" ? r.region : r.name;
         var row = [label, formatNum(r.data.weeks)];
-        metrics.forEach(function (m) { row.push(formatNum(r.data[m.key])); });
+        metrics.forEach(function (m) {
+          row.push(formatNum(r.type === "region" ? r.data[m.key] : metricValue(r.data, m)));
+        });
         aoa.push(row);
       });
 
       var ws = XLSX.utils.aoa_to_sheet(aoa);
       var wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, cfg.summaryTitle);
-      XLSX.writeFile(wb, cfg.fileBaseName + ".xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, summaryTitle);
+      XLSX.writeFile(wb, fileBaseName + ".xlsx");
     }
 
-    initTableHeader();
-    initSummaryGrid();
-
     return {
+      setMetrics: function (newMetrics) {
+        metrics = newMetrics;
+        initTableHeader();
+        initSummaryGrid();
+      },
       renderAll: function (state, onRemove) {
         renderChecklist(state);
         renderTable(state, onRemove);
@@ -607,33 +698,19 @@
       });
     }
 
-    var childrenSection = createSection({
-      prefix: "children",
-      summaryTitle: "全台兒童統計",
-      fileBaseName: "children-stats",
-      extract: function (entry) { return entry.children; },
-      metrics: [
-        { key: "avgSunday", label: "主日（週平均）", totalLabel: "主日總計" },
-        { key: "avgLife", label: "召會生活（週平均）", totalLabel: "召會生活總計" },
-        { key: "avgGroup", label: "小排（週平均）", totalLabel: "小排總計" }
-      ]
+    var statsSection = createStatsSection({
+      prefix: "stats",
+      summaryTitle: "全台統計",
+      fileBaseName: "congregation-stats"
     });
 
-    var youthSection = createSection({
-      prefix: "youth",
-      summaryTitle: "全台青職統計",
-      fileBaseName: "youth-stats",
-      extract: function (entry) { return entry.youth; },
-      metrics: [
-        { key: "avgSunday", label: "主日（週平均）", totalLabel: "主日總計" },
-        { key: "avgFamily", label: "家聚會（出訪+受訪，週平均）", totalLabel: "家聚會總計" },
-        { key: "avgGroup", label: "小排（週平均）", totalLabel: "小排總計" },
-        { key: "avgLifeReading", label: "生命讀經（週平均）", totalLabel: "生命讀經總計" }
-      ]
-    });
+    function applyMetrics() {
+      statsSection.setMetrics(buildMetricsFromConfig(METRICS_CONFIG));
+      renderAll();
+    }
 
     function removeCongregation(name) {
-      var ok = window.confirm("確定要移除「" + name + "」的資料嗎？（兒童、青職資料會一併移除）");
+      var ok = window.confirm("確定要移除「" + name + "」的資料嗎？");
       if (!ok) return;
       delete dataState[name];
       renderAll();
@@ -643,8 +720,7 @@
     }
 
     function renderAll() {
-      childrenSection.renderAll(dataState, removeCongregation);
-      youthSection.renderAll(dataState, removeCongregation);
+      statsSection.renderAll(dataState, removeCongregation);
     }
 
     function onParseClick() {
@@ -663,12 +739,10 @@
       pickedFile.arrayBuffer().then(function (buf) {
         var workbook = readWorkbook(buf);
         var scan = scanWeeklyGrid(workbook);
-        var childrenResult = deriveChildrenResult(scan);
-        var youthResult = deriveYouthResult(scan);
 
         var isUpdate = Object.prototype.hasOwnProperty.call(dataState, congregation);
         if (isUpdate) {
-          var ok = window.confirm("「" + congregation + "」已經上傳過資料（兒童、青職），是否要用這個新檔案覆蓋？");
+          var ok = window.confirm("「" + congregation + "」已經上傳過資料，是否要用這個新檔案覆蓋？");
           if (!ok) {
             els.parseBtn.disabled = false;
             return;
@@ -677,19 +751,22 @@
 
         var entry = {
           weeks: scan.weeks,
-          children: childrenResult,
-          youth: youthResult,
+          sums: scan.sums,
           fileName: pickedFile.name,
           updatedAt: new Date().toISOString()
         };
         dataState[congregation] = entry;
         renderAll();
 
+        var metrics = buildMetricsFromConfig(METRICS_CONFIG);
+        var summaryText = metrics.length
+          ? metrics.map(function (m) {
+              return m.label.replace("（週平均）", "") + " " + formatNum(m.value(scan.sums));
+            }).join("、")
+          : "（尚未設定統計欄位，請點右上角「⚙ 設定統計欄位」勾選）";
+
         showStatus(
-          "已加入「" + congregation + "」：共 " + scan.weeks + " 週。" +
-          "兒童 — 主日 " + formatNum(childrenResult.avgSunday) + "、召會生活 " + formatNum(childrenResult.avgLife) + "、小排 " + formatNum(childrenResult.avgGroup) + "；" +
-          "青職 — 主日 " + formatNum(youthResult.avgSunday) + "、家聚會 " + formatNum(youthResult.avgFamily) + "、小排 " + formatNum(youthResult.avgGroup) + "、生命讀經 " + formatNum(youthResult.avgLifeReading) +
-          "（儲存中…）",
+          "已加入「" + congregation + "」：共 " + scan.weeks + " 週。" + summaryText + "（儲存中…）",
           "ok"
         );
 
@@ -711,7 +788,7 @@
 
     function onResetAllClick() {
       if (!Object.keys(dataState).length) return;
-      var ok = window.confirm("確定要清除所有已上傳的召會資料嗎？（兒童、青職資料會一併清除，此操作無法復原）");
+      var ok = window.confirm("確定要清除所有已上傳的召會資料嗎？（此操作無法復原）");
       if (!ok) return;
       dataState = {};
       renderAll();
@@ -725,29 +802,16 @@
     setupDropzone();
     els.parseBtn.addEventListener("click", onParseClick);
     els.resetAllBtn.addEventListener("click", onResetAllClick);
-    childrenSection.bindDownloadButton(function () { return dataState; });
-    youthSection.bindDownloadButton(function () { return dataState; });
+    statsSection.bindDownloadButton(function () { return dataState; });
 
-    renderAll();
+    applyMetrics();
 
     return {
       initSelect: initSelect,
       renderAll: renderAll,
+      applyMetrics: applyMetrics,
       hasPendingWrites: function () { return pendingWrites > 0; }
     };
-  }
-
-  function initTabs() {
-    var buttons = document.querySelectorAll("[data-tab-target]");
-    buttons.forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var target = btn.getAttribute("data-tab-target");
-        buttons.forEach(function (b) { b.classList.toggle("active", b === btn); });
-        document.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
-          panel.style.display = panel.getAttribute("data-tab-panel") === target ? "" : "none";
-        });
-      });
-    });
   }
 
   function groupsToText(groups) {
@@ -782,7 +846,7 @@
     return groups.filter(function (g) { return g.members.length > 0; });
   }
 
-  function initSettingsModal(app) {
+  function initGroupsSettingsModal(app) {
     var openBtn = document.getElementById("open-settings-btn");
     var backdrop = document.getElementById("settings-backdrop");
     var textarea = document.getElementById("settings-textarea");
@@ -837,6 +901,120 @@
         close();
         app.initSelect();
         app.renderAll();
+      }).catch(function (err) {
+        saveBtn.disabled = false;
+        window.alert("儲存失敗：" + err.message);
+      });
+    });
+  }
+
+  function initMetricsSettingsModal(app) {
+    var openBtn = document.getElementById("open-metrics-settings-btn");
+    var backdrop = document.getElementById("metrics-settings-backdrop");
+    var meetingContainer = document.getElementById("metrics-meeting-options");
+    var roleContainer = document.getElementById("metrics-role-options");
+    var extraContainer = document.getElementById("metrics-extra-options");
+    var countEl = document.getElementById("metrics-settings-count");
+    var clearBtn = document.getElementById("metrics-settings-clear-btn");
+    var presetChildrenBtn = document.getElementById("metrics-preset-children-btn");
+    var presetYouthBtn = document.getElementById("metrics-preset-youth-btn");
+    var cancelBtn = document.getElementById("metrics-settings-cancel-btn");
+    var saveBtn = document.getElementById("metrics-settings-save-btn");
+
+    function renderCheckboxes(container, options) {
+      container.innerHTML = "";
+      options.forEach(function (opt) {
+        var label = document.createElement("label");
+        label.className = "checkbox-item";
+        var input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = opt;
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(opt));
+        container.appendChild(label);
+        input.addEventListener("change", updateCount);
+      });
+    }
+
+    function getChecked(container) {
+      var out = [];
+      container.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+        if (cb.checked) out.push(cb.value);
+      });
+      return out;
+    }
+
+    function setChecked(container, values) {
+      container.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+        cb.checked = values.indexOf(cb.value) !== -1;
+      });
+    }
+
+    function updateCount() {
+      var meetings = getChecked(meetingContainer);
+      var roles = getChecked(roleContainer);
+      var extras = getChecked(extraContainer);
+      var comboCount = meetings.length * roles.length + extras.length;
+      countEl.textContent = "目前勾選會產生 " + comboCount + " 個統計欄位";
+    }
+
+    function open() {
+      setChecked(meetingContainer, METRICS_CONFIG.meetings);
+      setChecked(roleContainer, METRICS_CONFIG.roles);
+      setChecked(extraContainer, METRICS_CONFIG.extras);
+      updateCount();
+      backdrop.style.display = "flex";
+    }
+
+    function close() {
+      backdrop.style.display = "none";
+    }
+
+    function applyPreset(preset) {
+      setChecked(meetingContainer, preset.meetings);
+      setChecked(roleContainer, preset.roles);
+      setChecked(extraContainer, preset.extras);
+      updateCount();
+    }
+
+    renderCheckboxes(meetingContainer, MEETING_OPTIONS);
+    renderCheckboxes(roleContainer, ROLE_OPTIONS);
+    renderCheckboxes(extraContainer, EXTRA_OPTIONS);
+
+    openBtn.style.display = "";
+    openBtn.addEventListener("click", open);
+    cancelBtn.addEventListener("click", close);
+    backdrop.addEventListener("click", function (e) {
+      if (e.target === backdrop) close();
+    });
+
+    clearBtn.addEventListener("click", function () {
+      setChecked(meetingContainer, []);
+      setChecked(roleContainer, []);
+      setChecked(extraContainer, []);
+      updateCount();
+    });
+
+    presetChildrenBtn.addEventListener("click", function () {
+      applyPreset(QUICK_PRESETS.children);
+    });
+
+    presetYouthBtn.addEventListener("click", function () {
+      applyPreset(QUICK_PRESETS.youth);
+    });
+
+    saveBtn.addEventListener("click", function () {
+      saveBtn.disabled = true;
+      var config = {
+        meetings: getChecked(meetingContainer),
+        roles: getChecked(roleContainer),
+        extras: getChecked(extraContainer)
+      };
+      apiSaveMetrics(ROOM_ID, config).then(function () {
+        METRICS_CONFIG = normalizeMetricsConfig(config) || DEFAULT_METRICS_CONFIG;
+        saveBtn.disabled = false;
+        close();
+        app.applyMetrics();
       }).catch(function (err) {
         saveBtn.disabled = false;
         window.alert("儲存失敗：" + err.message);
@@ -949,16 +1127,18 @@
     function applyRoomData(data) {
       CONGREGATION_GROUPS = normalizeGroups(data.groups) || CONGREGATION_GROUPS;
       CONGREGATIONS = flattenGroups(CONGREGATION_GROUPS);
+      METRICS_CONFIG = normalizeMetricsConfig(data.metrics) || METRICS_CONFIG;
       dataState = data.stats && typeof data.stats === "object" ? data.stats : {};
       roomName = data.name || "";
       renderRoomName();
 
       if (!app) {
         app = initUploadAndSections();
-        initSettingsModal(app);
+        initGroupsSettingsModal(app);
+        initMetricsSettingsModal(app);
       } else {
         app.initSelect();
-        app.renderAll();
+        app.applyMetrics();
       }
     }
 
@@ -969,10 +1149,11 @@
         apiFetchRoom(ROOM_ID).then(function (fresh) {
           CONGREGATION_GROUPS = normalizeGroups(fresh.groups) || CONGREGATION_GROUPS;
           CONGREGATIONS = flattenGroups(CONGREGATION_GROUPS);
+          METRICS_CONFIG = normalizeMetricsConfig(fresh.metrics) || METRICS_CONFIG;
           dataState = fresh.stats && typeof fresh.stats === "object" ? fresh.stats : {};
           roomName = fresh.name || "";
           renderRoomName();
-          if (app) app.renderAll();
+          if (app) app.applyMetrics();
         }).catch(function () {
           /* transient network hiccup - just try again next tick */
         });
@@ -1028,7 +1209,6 @@
   }
 
   function init() {
-    initTabs();
     initLandingAndRoom();
 
     if ("serviceWorker" in navigator) {

@@ -88,6 +88,13 @@ header.app-header h1 {
   white-space: nowrap;
 }
 
+.header-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
 .settings-btn {
   white-space: nowrap;
   flex-shrink: 0;
@@ -167,32 +174,28 @@ header.app-header h1 {
   }
 }
 
-.tab-nav {
+.checkbox-grid {
   display: flex;
-  gap: 0.4rem;
-  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.6rem;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 0.3rem;
-}
-
-.tab-btn {
-  flex: 1;
-  background: transparent;
-  border: none;
-  border-radius: 999px;
-  padding: 0.55rem 1rem;
-  font-weight: 700;
-  font-size: 0.92rem;
-  color: var(--text-muted);
+  padding: 0.3rem 0.7rem;
   cursor: pointer;
+  user-select: none;
 }
 
-.tab-btn.active {
-  background: var(--surface);
-  color: var(--accent);
-  box-shadow: var(--shadow);
+.checkbox-item input {
+  margin: 0;
 }
 
 .tab-footnote {
