@@ -84,6 +84,17 @@ header.app-header p {
   flex: 1 1 auto;
 }
 
+.current-metrics-summary {
+  margin: 0.6rem 0 0;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.current-metrics-summary strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 header.app-header h1 {
   white-space: nowrap;
 }

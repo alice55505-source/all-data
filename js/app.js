@@ -704,8 +704,23 @@
       fileBaseName: "congregation-stats"
     });
 
+    var currentMetricsSummaryEl = document.getElementById("current-metrics-summary");
+
+    function renderCurrentMetricsSummary(metrics) {
+      currentMetricsSummaryEl.style.display = "";
+      if (!metrics.length) {
+        currentMetricsSummaryEl.innerHTML =
+          "目前尚未設定統計欄位，請點右上角「⚙ 設定統計欄位」勾選。";
+        return;
+      }
+      var labels = metrics.map(function (m) { return m.label.replace("（週平均）", ""); });
+      currentMetricsSummaryEl.innerHTML = "目前統計欄位：<strong>" + labels.join("、") + "</strong>";
+    }
+
     function applyMetrics() {
-      statsSection.setMetrics(buildMetricsFromConfig(METRICS_CONFIG));
+      var metrics = buildMetricsFromConfig(METRICS_CONFIG);
+      statsSection.setMetrics(metrics);
+      renderCurrentMetricsSummary(metrics);
       renderAll();
     }
 
