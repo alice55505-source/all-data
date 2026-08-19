@@ -69,7 +69,7 @@
 
   // 快速選擇：套用一組常用的聚會×身份組合，對應原本固定的「兒童」「青職」分頁。
   var QUICK_PRESETS = {
-    children: { meetings: ["召會生活", "小排"], roles: ["學齡前", "國小"], extras: ["兒童主日"] },
+    children: { meetings: ["召會生活", "小排"], roles: ["兒童"], extras: ["兒童主日"] },
     youth: { meetings: ["主日", "家聚會（出訪+受訪）", "小排", "生命讀經"], roles: ["青職"], extras: [] }
   };
 
