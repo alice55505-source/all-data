@@ -1,4 +1,4 @@
-import { jsonResponse } from "../_lib.js";
+import { jsonResponse, pruneEmptyRooms } from "../_lib.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I/L to avoid confusion
 
@@ -28,6 +28,8 @@ export async function onRequestPost(context) {
   var db = context.env.DB;
   var now = new Date().toISOString();
   var groupsJson = JSON.stringify(DEFAULT_GROUPS);
+
+  context.waitUntil(pruneEmptyRooms(db));
 
   for (var attempt = 0; attempt < 5; attempt++) {
     var id = generateRoomId();
