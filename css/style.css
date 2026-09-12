@@ -513,6 +513,22 @@ td.congregation-name {
   min-width: 0;
 }
 
+.room-history {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.room-history-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.room-history-item {
+  margin: 0 0.4rem 0.4rem 0;
+}
+
 .room-bar {
   display: flex;
   flex-wrap: wrap;

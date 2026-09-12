@@ -155,6 +155,31 @@
     window.location.href = url.toString();
   }
 
+  // Remembers rooms this browser has actually connected to, so someone who
+  // forgot to copy down the room code (closed the tab, lost the link) can
+  // still find their way back instead of losing access to their data.
+  var ROOM_HISTORY_KEY = "roomHistory";
+  var ROOM_HISTORY_MAX = 10;
+
+  function loadRoomHistory() {
+    try {
+      var list = JSON.parse(window.localStorage.getItem(ROOM_HISTORY_KEY) || "[]");
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveRoomToHistory(id, name) {
+    try {
+      var list = loadRoomHistory().filter(function (r) { return r.id !== id; });
+      list.unshift({ id: id, name: name || "" });
+      window.localStorage.setItem(ROOM_HISTORY_KEY, JSON.stringify(list.slice(0, ROOM_HISTORY_MAX)));
+    } catch (e) {
+      /* localStorage unavailable (private mode, quota, etc.) - not critical */
+    }
+  }
+
   // ---- 週報網格：一次掃描，兒童／青職共用 ----
 
   var GRID_SHEET_NAME = "週報網格";
@@ -860,6 +885,7 @@
     var copyCodeBtn = document.getElementById("copy-room-code-btn");
     var refreshBtn = document.getElementById("refresh-room-btn");
     var leaveBtn = document.getElementById("leave-room-btn");
+    var roomHistoryEl = document.getElementById("room-history");
 
     var roomName = "";
     var app = null;
@@ -870,6 +896,29 @@
       landingStatus.className = "status-msg show " + type;
     }
 
+    function renderRoomHistory() {
+      if (!roomHistoryEl) return;
+      var list = loadRoomHistory().filter(function (r) { return r.id !== ROOM_ID; });
+      roomHistoryEl.innerHTML = "";
+      if (!list.length) {
+        roomHistoryEl.style.display = "none";
+        return;
+      }
+      roomHistoryEl.style.display = "";
+      var label = document.createElement("div");
+      label.className = "room-history-label";
+      label.textContent = "最近使用過的房間：";
+      roomHistoryEl.appendChild(label);
+      list.forEach(function (r) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn-secondary room-history-item";
+        btn.textContent = r.name ? (r.name + "（" + r.id + "）") : r.id;
+        btn.addEventListener("click", function () { goToRoom(r.id); });
+        roomHistoryEl.appendChild(btn);
+      });
+    }
+
     function renderRoomName() {
       if (roomName) {
         roomNameDisplay.textContent = roomName;
@@ -878,6 +927,7 @@
         roomNameDisplay.textContent = "（尚未命名）";
         roomNameDisplay.classList.add("unnamed");
       }
+      if (ROOM_ID) saveRoomToHistory(ROOM_ID, roomName);
     }
 
     createBtn.addEventListener("click", function () {
@@ -994,6 +1044,7 @@
       ROOM_ID = getRoomIdFromUrl();
       if (!ROOM_ID) {
         landing.style.display = "";
+        renderRoomHistory();
         return;
       }
 
@@ -1016,6 +1067,7 @@
         appMain.style.display = "none";
         createBtn.disabled = false;
         joinBtn.disabled = false;
+        renderRoomHistory();
         if (err.notFound) {
           showLandingStatus("找不到房間代碼「" + ROOM_ID + "」，請確認代碼或建立新房間。", "error");
         } else {
