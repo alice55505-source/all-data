@@ -15,6 +15,7 @@ export async function onRequestGet(context) {
     name: row.name || "",
     groups: parseJsonColumn(row.groups_json, []),
     stats: parseJsonColumn(row.stats_json, {}),
+    metrics: parseJsonColumn(row.metrics_json, { meetings: [], roles: [], extras: [] }),
     periods: parseJsonColumn(row.periods_json || "[]", [])
   });
 }
