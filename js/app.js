@@ -41,6 +41,7 @@
   var CONGREGATION_GROUPS = [];
   var CONGREGATIONS = [];
   var dataState = {};
+  var PERIODS = [];
   var ROOM_ID = null;
 
   var TOTAL_LABEL = "合計";
@@ -133,6 +134,17 @@
     });
   }
 
+  function apiSavePeriods(id, periods) {
+    return fetch("/api/rooms/" + encodeURIComponent(id) + "/periods", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ periods: periods })
+    }).then(function (res) {
+      if (!res.ok) throw new Error("儲存失敗，請檢查網路連線");
+      return res.json();
+    });
+  }
+
   function apiSetRoomName(id, name) {
     return fetch("/api/rooms/" + encodeURIComponent(id) + "/name", {
       method: "PATCH",
@@ -159,6 +171,15 @@
 
   var GRID_SHEET_NAME = "週報網格";
   var GRID_WEEK_PATTERN = /^\d+W\d+$/;
+
+  // Every "category|age" key that deriveChildrenResult/deriveYouthResult read.
+  var WEEKLY_KEY_SET = {
+    "兒童|小計": true, "主日|國小": true,
+    "小排|學齡前": true, "小排|國小": true,
+    "召會生活|學齡前": true, "召會生活|國小": true,
+    "主日|青職": true, "家聚會出訪|青職": true, "家聚會受訪|青職": true,
+    "小排|青職": true, "生命讀經|青職": true
+  };
 
   function fillForward(row, startCol) {
     var out = [];
@@ -267,6 +288,30 @@
       }
     }
 
+    // Per-week values are always captured (only for the keys the metrics
+    // actually use, to keep the room payload small) so the user can later
+    // regroup weeks into their own periods, e.g. one month per group.
+    var weekPerCol = fillForward(weekRow, groupColIdx + 1);
+    var catPerCol = fillForward(categoryRow, groupColIdx + 1);
+
+    var matches = [];
+    for (var col3 = groupColIdx + 1; col3 < width; col3++) {
+      var wk = weekPerCol[col3];
+      if (!wk || !GRID_WEEK_PATTERN.test(wk)) continue;
+      var cat3 = catPerCol[col3];
+      if (!cat3) continue;
+      var age3 = normalizeAgeLabel(cat3, ageRow[col3]);
+      matches.push({ week: wk, key: cat3 + "|" + age3, col: col3 });
+    }
+
+    var weekly = {};
+    matches.forEach(function (m) {
+      if (!weekly[m.week]) weekly[m.week] = {};
+      if (!WEEKLY_KEY_SET[m.key]) return;
+      var v = valueAtCol(m.col);
+      if (v) weekly[m.week][m.key] = (weekly[m.week][m.key] || 0) + v;
+    });
+
     if (avgBlockStartCol !== -1) {
       var avgBlockEndCol = width;
       for (var col2 = avgBlockStartCol + 1; col2 < width; col2++) {
@@ -285,43 +330,64 @@
         avgSums[cat + "|" + age] = valueAtCol(c);
       }
 
-      return { weeks: Number(avgWeeksLabel) || 0, sums: avgSums };
+      return { weeks: Number(avgWeeksLabel) || 0, sums: avgSums, weekly: weekly };
     }
 
-    // Fallback: no pre-computed average block found - sum each real week
-    // column ourselves and divide by how many week columns were detected.
-    var weekPerCol = fillForward(weekRow, groupColIdx + 1);
-    var catPerCol = fillForward(categoryRow, groupColIdx + 1);
-
-    var matches = [];
-    for (var col3 = groupColIdx + 1; col3 < width; col3++) {
-      var wk = weekPerCol[col3];
-      if (!wk || !GRID_WEEK_PATTERN.test(wk)) continue;
-      var cat3 = catPerCol[col3];
-      if (!cat3) continue;
-      var age3 = normalizeAgeLabel(cat3, ageRow[col3]);
-      matches.push({ week: wk, key: cat3 + "|" + age3, col: col3 });
-    }
-
+    // Fallback: no pre-computed average block found - average the real
+    // week columns ourselves.
     if (!matches.length) {
       throw new Error("在「" + GRID_SHEET_NAME + "」分頁找不到任何週別欄位資料");
     }
 
+    var all = scanForWeeks(weekly, Object.keys(weekly));
+    return { weeks: all.weeks, sums: all.sums, weekly: weekly };
+  }
+
+  // Averages the stored per-week values over the given weeks (only the
+  // ones this congregation actually has). Returns null if none match.
+  function scanForWeeks(weekly, weeks) {
+    var present = weeks.filter(function (w) { return weekly && weekly[w]; });
+    if (!present.length) return null;
     var sums = {};
-    var weeksSet = {};
-    var weeksCount = 0;
-
-    matches.forEach(function (m) {
-      if (!weeksSet[m.week]) {
-        weeksSet[m.week] = true;
-        weeksCount++;
-      }
-      sums[m.key] = (sums[m.key] || 0) + valueAtCol(m.col);
+    present.forEach(function (w) {
+      Object.keys(weekly[w]).forEach(function (k) {
+        sums[k] = (sums[k] || 0) + weekly[w][k];
+      });
     });
+    Object.keys(sums).forEach(function (k) { sums[k] = sums[k] / present.length; });
+    return { weeks: present.length, sums: sums };
+  }
 
-    Object.keys(sums).forEach(function (key) { sums[key] = sums[key] / weeksCount; });
+  function compareWeeks(a, b) {
+    var pa = a.split("W"), pb = b.split("W");
+    return (Number(pa[0]) - Number(pb[0])) || (Number(pa[1]) - Number(pb[1]));
+  }
 
-    return { weeks: weeksCount, sums: sums };
+  function describeWeeks(weeks) {
+    if (!weeks.length) return "";
+    if (weeks.length === 1) return weeks[0];
+    return weeks[0] + "–" + weeks[weeks.length - 1] + "，共 " + weeks.length + " 週";
+  }
+
+  function normalizePeriods(raw) {
+    if (!Array.isArray(raw)) return [];
+    var seenNames = {};
+    var out = [];
+    raw.forEach(function (p) {
+      if (!p || typeof p.name !== "string" || !Array.isArray(p.weeks)) return;
+      var name = p.name.trim();
+      if (!name || seenNames[name]) return;
+      var seenWeeks = {};
+      var weeks = p.weeks.filter(function (w) {
+        if (typeof w !== "string" || !GRID_WEEK_PATTERN.test(w) || seenWeeks[w]) return false;
+        seenWeeks[w] = true;
+        return true;
+      }).sort(compareWeeks);
+      if (!weeks.length) return;
+      seenNames[name] = true;
+      out.push({ name: name, weeks: weeks });
+    });
+    return out;
   }
 
   function deriveChildrenResult(scan) {
@@ -489,7 +555,7 @@
       }
     }
 
-    function onDownloadClick(state) {
+    function onDownloadClick(state, periodName) {
       var rowsData = buildRows(state);
       if (!rowsData.length) return;
 
@@ -505,7 +571,8 @@
       var ws = XLSX.utils.aoa_to_sheet(aoa);
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, cfg.summaryTitle);
-      XLSX.writeFile(wb, cfg.fileBaseName + ".xlsx");
+      var suffix = periodName ? "-" + periodName.replace(/[\\/:*?"<>|]/g, "_") : "";
+      XLSX.writeFile(wb, cfg.fileBaseName + suffix + ".xlsx");
     }
 
     initTableHeader();
@@ -517,12 +584,249 @@
         renderTable(state, onRemove);
         renderSummary(state);
       },
-      bindDownloadButton: function (getState) {
+      bindDownloadButton: function (getState, getPeriodName) {
         els.downloadBtn.addEventListener("click", function () {
-          onDownloadClick(getState());
+          onDownloadClick(getState(), getPeriodName());
         });
       }
     };
+  }
+
+  // ---- 週別區間（自選分組） ----
+
+  function detectedWeeks() {
+    var set = {};
+    Object.keys(dataState).forEach(function (name) {
+      var weekly = dataState[name] && dataState[name].weekly;
+      if (weekly) Object.keys(weekly).forEach(function (w) { set[w] = true; });
+    });
+    PERIODS.forEach(function (p) { p.weeks.forEach(function (w) { set[w] = true; }); });
+    return Object.keys(set).sort(compareWeeks);
+  }
+
+  function createPeriodPanel(onChange) {
+    var els = {
+      select: document.getElementById("period-select"),
+      detected: document.getElementById("period-detected"),
+      warn: document.getElementById("period-warn"),
+      openBtn: document.getElementById("open-period-btn"),
+      backdrop: document.getElementById("period-backdrop"),
+      groupsBox: document.getElementById("period-groups"),
+      addBtn: document.getElementById("period-add-btn"),
+      quickInput: document.getElementById("period-quick-input"),
+      quickBtn: document.getElementById("period-quick-btn"),
+      weeksBox: document.getElementById("period-weeks"),
+      cancelBtn: document.getElementById("period-cancel-btn"),
+      saveBtn: document.getElementById("period-save-btn")
+    };
+
+    var selectedName = "";
+    var optionsSignature = null;
+    var draftNames = [];
+    var draftAssign = {};
+    var draftWeeks = [];
+
+    function getActivePeriod() {
+      for (var i = 0; i < PERIODS.length; i++) {
+        if (PERIODS[i].name === selectedName) return PERIODS[i];
+      }
+      return null;
+    }
+
+    function render(noWeekly) {
+      if (!getActivePeriod()) selectedName = "";
+      // Background polling re-renders every few seconds; only rebuild the
+      // options when they actually changed so an open dropdown isn't reset.
+      var signature = JSON.stringify(PERIODS);
+      if (signature !== optionsSignature) {
+        optionsSignature = signature;
+        els.select.innerHTML = "";
+        var all = document.createElement("option");
+        all.value = "";
+        all.textContent = "全部週（各召會報表自帶的週平均）";
+        els.select.appendChild(all);
+        PERIODS.forEach(function (p) {
+          var opt = document.createElement("option");
+          opt.value = p.name;
+          opt.textContent = p.name + "（" + describeWeeks(p.weeks) + "）";
+          els.select.appendChild(opt);
+        });
+      }
+      els.select.value = selectedName;
+
+      var weeks = detectedWeeks();
+      els.detected.textContent = weeks.length
+        ? "已偵測到 " + weeks.length + " 週：" + weeks.join("、")
+        : "尚未偵測到週別，請先上傳週報。";
+
+      if (selectedName && noWeekly && noWeekly.length) {
+        els.warn.style.display = "block";
+        els.warn.textContent = "以下召會是舊版上傳、沒有逐週資料，無法套用區間，請重新上傳：" + noWeekly.join("、");
+      } else {
+        els.warn.style.display = "none";
+      }
+
+      var label = selectedName ? "區間：" + selectedName : "";
+      document.querySelectorAll("[data-period-badge]").forEach(function (b) {
+        b.textContent = label;
+        b.style.display = label ? "" : "none";
+      });
+    }
+
+    function renderDraft() {
+      els.groupsBox.innerHTML = "";
+      draftNames.forEach(function (name, idx) {
+        var count = draftWeeks.filter(function (w) { return draftAssign[w] === idx; }).length;
+        var row = document.createElement("div");
+        row.className = "period-group-row";
+        var input = document.createElement("input");
+        input.type = "text";
+        input.value = name;
+        input.placeholder = "例如 9月";
+        input.maxLength = 30;
+        input.addEventListener("input", function () {
+          draftNames[idx] = input.value;
+          renderWeekSelects();
+        });
+        var countEl = document.createElement("span");
+        countEl.className = "period-group-count";
+        countEl.textContent = count + " 週";
+        var del = document.createElement("button");
+        del.className = "btn-danger-ghost";
+        del.textContent = "刪除";
+        del.addEventListener("click", function () {
+          draftNames.splice(idx, 1);
+          draftWeeks.forEach(function (w) {
+            if (draftAssign[w] === idx) draftAssign[w] = -1;
+            else if (draftAssign[w] > idx) draftAssign[w]--;
+          });
+          renderDraft();
+        });
+        row.appendChild(input);
+        row.appendChild(countEl);
+        row.appendChild(del);
+        els.groupsBox.appendChild(row);
+      });
+      renderWeekSelects();
+    }
+
+    function renderWeekSelects() {
+      els.weeksBox.innerHTML = "";
+      if (!draftWeeks.length) {
+        els.weeksBox.innerHTML = '<div class="empty-hint">尚未偵測到週別，請先上傳至少一個召會的週報。</div>';
+        return;
+      }
+      draftWeeks.forEach(function (w) {
+        var row = document.createElement("div");
+        row.className = "period-week-row";
+        var label = document.createElement("span");
+        label.textContent = w;
+        var sel = document.createElement("select");
+        var none = document.createElement("option");
+        none.value = "-1";
+        none.textContent = "（不使用）";
+        sel.appendChild(none);
+        draftNames.forEach(function (name, idx) {
+          var opt = document.createElement("option");
+          opt.value = String(idx);
+          opt.textContent = name.trim() || "第 " + (idx + 1) + " 組";
+          sel.appendChild(opt);
+        });
+        sel.value = String(draftAssign[w] == null ? -1 : draftAssign[w]);
+        sel.addEventListener("change", function () {
+          draftAssign[w] = Number(sel.value);
+          var counts = els.groupsBox.querySelectorAll(".period-group-count");
+          draftNames.forEach(function (_, idx) {
+            if (counts[idx]) {
+              counts[idx].textContent = draftWeeks.filter(function (x) { return draftAssign[x] === idx; }).length + " 週";
+            }
+          });
+        });
+        row.appendChild(label);
+        row.appendChild(sel);
+        els.weeksBox.appendChild(row);
+      });
+    }
+
+    function open() {
+      draftWeeks = detectedWeeks();
+      draftNames = PERIODS.map(function (p) { return p.name; });
+      draftAssign = {};
+      draftWeeks.forEach(function (w) { draftAssign[w] = -1; });
+      PERIODS.forEach(function (p, idx) {
+        p.weeks.forEach(function (w) { draftAssign[w] = idx; });
+      });
+      els.quickInput.value = "";
+      renderDraft();
+      els.backdrop.style.display = "flex";
+    }
+
+    function close() {
+      els.backdrop.style.display = "none";
+    }
+
+    // "4,5" -> first 4 detected weeks into group 1, next 5 into group 2.
+    function applyQuickSplit() {
+      var sizes = els.quickInput.value.split(/[,，、\s]+/).map(Number).filter(function (n) { return n > 0; });
+      if (!sizes.length) {
+        window.alert("請輸入每組的週數，例如 4,5");
+        return;
+      }
+      draftNames = [];
+      draftWeeks.forEach(function (w) { draftAssign[w] = -1; });
+      var pos = 0;
+      sizes.forEach(function (size, idx) {
+        if (pos >= draftWeeks.length) return;
+        draftNames.push("第 " + (idx + 1) + " 組");
+        for (var i = 0; i < size && pos < draftWeeks.length; i++, pos++) {
+          draftAssign[draftWeeks[pos]] = idx;
+        }
+      });
+      renderDraft();
+    }
+
+    function save() {
+      var names = draftNames.map(function (n, idx) { return n.trim() || "第 " + (idx + 1) + " 組"; });
+      var seen = {};
+      for (var i = 0; i < names.length; i++) {
+        if (seen[names[i]]) {
+          window.alert("組別名稱「" + names[i] + "」重複了，請改成不同名稱");
+          return;
+        }
+        seen[names[i]] = true;
+      }
+      var periods = normalizePeriods(names.map(function (name, idx) {
+        return { name: name, weeks: draftWeeks.filter(function (w) { return draftAssign[w] === idx; }) };
+      }));
+      els.saveBtn.disabled = true;
+      apiSavePeriods(ROOM_ID, periods).then(function () {
+        PERIODS = periods;
+        els.saveBtn.disabled = false;
+        close();
+        onChange();
+      }).catch(function (err) {
+        els.saveBtn.disabled = false;
+        window.alert("儲存失敗：" + err.message);
+      });
+    }
+
+    els.select.addEventListener("change", function () {
+      selectedName = els.select.value;
+      onChange();
+    });
+    els.openBtn.addEventListener("click", open);
+    els.cancelBtn.addEventListener("click", close);
+    els.backdrop.addEventListener("click", function (e) {
+      if (e.target === els.backdrop) close();
+    });
+    els.addBtn.addEventListener("click", function () {
+      draftNames.push("");
+      renderDraft();
+    });
+    els.quickBtn.addEventListener("click", applyQuickSplit);
+    els.saveBtn.addEventListener("click", save);
+
+    return { render: render, getActivePeriod: getActivePeriod };
   }
 
   function initUploadAndSections() {
@@ -642,9 +946,38 @@
       });
     }
 
+    var periodPanel = createPeriodPanel(function () { renderAll(); });
+
+    // The view the sections render: either the uploaded entries as-is
+    // (report's own N-week average), or every entry re-averaged over the
+    // weeks of the selected period.
+    function buildViewState() {
+      var period = periodPanel.getActivePeriod();
+      if (!period) return { state: dataState, noWeekly: [] };
+      var state = {};
+      var noWeekly = [];
+      Object.keys(dataState).forEach(function (name) {
+        var entry = dataState[name];
+        if (!entry.weekly) {
+          noWeekly.push(name);
+          return;
+        }
+        var scan = scanForWeeks(entry.weekly, period.weeks);
+        if (!scan) return;
+        state[name] = {
+          weeks: scan.weeks,
+          children: deriveChildrenResult(scan),
+          youth: deriveYouthResult(scan)
+        };
+      });
+      return { state: state, noWeekly: noWeekly };
+    }
+
     function renderAll() {
-      childrenSection.renderAll(dataState, removeCongregation);
-      youthSection.renderAll(dataState, removeCongregation);
+      var view = buildViewState();
+      periodPanel.render(view.noWeekly);
+      childrenSection.renderAll(view.state, removeCongregation);
+      youthSection.renderAll(view.state, removeCongregation);
     }
 
     function onParseClick() {
@@ -679,6 +1012,7 @@
           weeks: scan.weeks,
           children: childrenResult,
           youth: youthResult,
+          weekly: scan.weekly,
           fileName: pickedFile.name,
           updatedAt: new Date().toISOString()
         };
@@ -686,7 +1020,7 @@
         renderAll();
 
         showStatus(
-          "已加入「" + congregation + "」：共 " + scan.weeks + " 週。" +
+          "已加入「" + congregation + "」：共 " + scan.weeks + " 週（偵測到週別 " + describeWeeks(Object.keys(scan.weekly).sort(compareWeeks)) + "）。" +
           "兒童 — 主日 " + formatNum(childrenResult.avgSunday) + "、召會生活 " + formatNum(childrenResult.avgLife) + "、小排 " + formatNum(childrenResult.avgGroup) + "；" +
           "青職 — 主日 " + formatNum(youthResult.avgSunday) + "、家聚會 " + formatNum(youthResult.avgFamily) + "、小排 " + formatNum(youthResult.avgGroup) + "、生命讀經 " + formatNum(youthResult.avgLifeReading) +
           "（儲存中…）",
@@ -725,8 +1059,13 @@
     setupDropzone();
     els.parseBtn.addEventListener("click", onParseClick);
     els.resetAllBtn.addEventListener("click", onResetAllClick);
-    childrenSection.bindDownloadButton(function () { return dataState; });
-    youthSection.bindDownloadButton(function () { return dataState; });
+    var getViewState = function () { return buildViewState().state; };
+    var getPeriodName = function () {
+      var p = periodPanel.getActivePeriod();
+      return p ? p.name : "";
+    };
+    childrenSection.bindDownloadButton(getViewState, getPeriodName);
+    youthSection.bindDownloadButton(getViewState, getPeriodName);
 
     renderAll();
 
@@ -950,6 +1289,7 @@
       CONGREGATION_GROUPS = normalizeGroups(data.groups) || CONGREGATION_GROUPS;
       CONGREGATIONS = flattenGroups(CONGREGATION_GROUPS);
       dataState = data.stats && typeof data.stats === "object" ? data.stats : {};
+      PERIODS = normalizePeriods(data.periods);
       roomName = data.name || "";
       renderRoomName();
 
@@ -970,6 +1310,7 @@
           CONGREGATION_GROUPS = normalizeGroups(fresh.groups) || CONGREGATION_GROUPS;
           CONGREGATIONS = flattenGroups(CONGREGATION_GROUPS);
           dataState = fresh.stats && typeof fresh.stats === "object" ? fresh.stats : {};
+          PERIODS = normalizePeriods(fresh.periods);
           roomName = fresh.name || "";
           renderRoomName();
           if (app) app.renderAll();
