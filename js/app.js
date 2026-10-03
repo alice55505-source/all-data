@@ -734,13 +734,15 @@
         });
         sel.value = String(draftAssign[w] == null ? -1 : draftAssign[w]);
         sel.addEventListener("change", function () {
-          draftAssign[w] = Number(sel.value);
-          var counts = els.groupsBox.querySelectorAll(".period-group-count");
-          draftNames.forEach(function (_, idx) {
-            if (counts[idx]) {
-              counts[idx].textContent = draftWeeks.filter(function (x) { return draftAssign[x] === idx; }).length + " 週";
-            }
+          var value = Number(sel.value);
+          // Picking a group carries it forward to every later week (e.g.
+          // switch week 5 to 10月 and weeks 6+ follow); "不使用" only
+          // excludes this one week.
+          var from = draftWeeks.indexOf(w);
+          draftWeeks.forEach(function (x, i) {
+            if (x === w || (value >= 0 && i > from)) draftAssign[x] = value;
           });
+          renderDraft();
         });
         row.appendChild(label);
         row.appendChild(sel);
