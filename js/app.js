@@ -513,7 +513,7 @@
       progressTotal: id("progress-total"),
       progressBar: id("progress-bar"),
       chipGrid: id("chip-grid"),
-      resultsTheadRow: id("results-thead-row"),
+      resultsThead: id("results-thead"),
       resultsTbody: id("results-tbody"),
       resultsEmpty: id("results-empty"),
       downloadBtn: id("download-btn"),
@@ -524,15 +524,29 @@
     var metrics = [];
 
     // Each view is one period being shown: { label, state }. With more than
-    // one view the table gains a 區間 column and every congregation/region
-    // gets one row per period, so months can be compared side by side.
+    // one view each congregation/region stays a single row and the columns
+    // repeat per period (all of 8月's columns, then all of 9月's), under a
+    // header row naming the period, so months can be compared side by side.
     var views = [];
     function multi() { return views.length > 1; }
 
     function initTableHeader() {
-      var html = "<th>召會 / 區域</th>" + (multi() ? "<th>區間</th>" : "") + "<th>週數</th>";
-      metrics.forEach(function (m) { html += "<th>" + m.label + "</th>"; });
-      els.resultsTheadRow.innerHTML = html;
+      var perView = 1 + metrics.length;
+      var html = "";
+      if (multi()) {
+        html += '<tr class="period-header-row"><th></th>';
+        views.forEach(function (v) {
+          html += '<th class="period-start" colspan="' + perView + '">' + v.label + "</th>";
+        });
+        html += "<th></th></tr>";
+      }
+      html += "<tr><th>召會 / 區域</th>";
+      views.forEach(function () {
+        html += '<th class="period-start">週數</th>';
+        metrics.forEach(function (m) { html += "<th>" + m.label + "</th>"; });
+      });
+      html += "<th></th></tr>";
+      els.resultsThead.innerHTML = html;
     }
 
     function initSummaryGrid() {
@@ -586,32 +600,38 @@
       return total;
     }
 
+    // One row per congregation (and per region total); row.parts[i] holds
+    // views[i]'s { weeks, values } for it, or null if it has no data there.
     function buildRows() {
       var out = [];
       CONGREGATION_GROUPS.forEach(function (group) {
         var uploaded = group.members.filter(hasInAnyView);
         if (!uploaded.length) return;
         uploaded.forEach(function (name) {
-          var first = true;
-          views.forEach(function (v) {
-            if (!Object.prototype.hasOwnProperty.call(v.state, name)) return;
-            out.push({ type: "congregation", name: name, period: v.label, first: first, data: v.state[name] });
-            first = false;
+          out.push({
+            type: "congregation",
+            name: name,
+            parts: views.map(function (v) {
+              if (!Object.prototype.hasOwnProperty.call(v.state, name)) return null;
+              var entry = v.state[name];
+              return { weeks: entry.weeks, values: metrics.map(function (m) { return metricValue(entry, m); }) };
+            })
           });
         });
-        views.forEach(function (v) {
-          var entries = uploaded
-            .filter(function (name) { return Object.prototype.hasOwnProperty.call(v.state, name); })
-            .map(function (name) { return v.state[name]; });
-          if (!entries.length) return;
-          out.push({ type: "region", region: group.region, period: v.label, data: regionTotalRow(entries) });
+        out.push({
+          type: "region",
+          name: group.region,
+          parts: views.map(function (v) {
+            var entries = uploaded
+              .filter(function (name) { return Object.prototype.hasOwnProperty.call(v.state, name); })
+              .map(function (name) { return v.state[name]; });
+            if (!entries.length) return null;
+            var total = regionTotalRow(entries);
+            return { weeks: total.weeks, values: metrics.map(function (m) { return total[m.key]; }) };
+          })
         });
       });
       return out;
-    }
-
-    function rowValue(r, m) {
-      return r.type === "region" ? r.data[m.key] : metricValue(r.data, m);
     }
 
     function renderTable(onRemove) {
@@ -626,20 +646,19 @@
 
       rowsData.forEach(function (r) {
         var tr = document.createElement("tr");
-        var html;
-        var periodCell = multi() ? "<td class=\"period-cell\">" + r.period + "</td>" : "";
-        if (r.type === "region") {
-          tr.className = "region-row";
-          html = "<td>" + r.region + "</td>" + periodCell + "<td>" + formatNum(r.data.weeks) + "</td>";
-          metrics.forEach(function (m) { html += "<td>" + formatNum(rowValue(r, m)) + "</td>"; });
-          html += "<td></td>";
-        } else {
-          if (multi() && r.first) tr.className = "group-start";
-          var nameText = r.first ? r.name : "";
-          html = "<td class=\"congregation-name\">" + nameText + "</td>" + periodCell + "<td>" + r.data.weeks + "</td>";
-          metrics.forEach(function (m) { html += "<td>" + formatNum(rowValue(r, m)) + "</td>"; });
-          html += "<td>" + (r.first ? "<button class=\"btn-danger-ghost\" data-remove=\"" + r.name + "\">移除</button>" : "") + "</td>";
-        }
+        var isRegion = r.type === "region";
+        if (isRegion) tr.className = "region-row";
+        var html = isRegion ? "<td>" + r.name + "</td>" : "<td class=\"congregation-name\">" + r.name + "</td>";
+        r.parts.forEach(function (part) {
+          if (!part) {
+            html += '<td class="period-start">—</td>';
+            metrics.forEach(function () { html += "<td>—</td>"; });
+            return;
+          }
+          html += '<td class="period-start">' + formatNum(part.weeks) + "</td>";
+          part.values.forEach(function (v) { html += "<td>" + formatNum(v) + "</td>"; });
+        });
+        html += isRegion ? "<td></td>" : "<td><button class=\"btn-danger-ghost\" data-remove=\"" + r.name + "\">移除</button></td>";
         tr.innerHTML = html;
         els.resultsTbody.appendChild(tr);
       });
@@ -690,16 +709,39 @@
       var rowsData = buildRows();
       if (!rowsData.length) return;
 
-      var header = ["召會 / 區域"].concat(multi() ? ["區間"] : [], ["週數"], metrics.map(function (m) { return m.label; }));
-      var aoa = [header];
+      var perView = 1 + metrics.length;
+      var aoa = [];
+      var merges = [];
+      if (multi()) {
+        var periodRow = [""];
+        views.forEach(function (v, i) {
+          periodRow.push(v.label);
+          for (var k = 1; k < perView; k++) periodRow.push("");
+          merges.push({ s: { r: 0, c: 1 + i * perView }, e: { r: 0, c: i * perView + perView } });
+        });
+        aoa.push(periodRow);
+      }
+      var header = ["召會 / 區域"];
+      views.forEach(function () {
+        header.push("週數");
+        metrics.forEach(function (m) { header.push(m.label); });
+      });
+      aoa.push(header);
       rowsData.forEach(function (r) {
-        var label = r.type === "region" ? r.region : r.name;
-        var row = [label].concat(multi() ? [r.period] : [], [formatNum(r.data.weeks)]);
-        metrics.forEach(function (m) { row.push(formatNum(rowValue(r, m))); });
+        var row = [r.name];
+        r.parts.forEach(function (part) {
+          if (!part) {
+            for (var k = 0; k < perView; k++) row.push("");
+            return;
+          }
+          row.push(formatNum(part.weeks));
+          part.values.forEach(function (v) { row.push(formatNum(v)); });
+        });
         aoa.push(row);
       });
 
       var ws = XLSX.utils.aoa_to_sheet(aoa);
+      if (merges.length) ws["!merges"] = merges;
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, summaryTitle);
       var periodName = views.map(function (v) { return v.label; }).join("_");
@@ -714,9 +756,9 @@
         initSummaryGrid();
       },
       renderAll: function (newViews, onRemove) {
-        var wasMulti = multi();
+        var oldLabels = views.map(function (v) { return v.label; }).join("|");
         views = newViews;
-        if (wasMulti !== multi()) initTableHeader();
+        if (oldLabels !== views.map(function (v) { return v.label; }).join("|")) initTableHeader();
         renderChecklist();
         renderTable(onRemove);
         renderSummary();

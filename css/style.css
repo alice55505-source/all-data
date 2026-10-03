@@ -578,17 +578,30 @@ td.congregation-name {
   padding: 0.4rem 0.7rem;
 }
 
-td.period-cell {
-  text-align: left;
-  color: var(--text-muted);
-}
-
-tr.region-row td.period-cell {
+tr.period-header-row th {
+  text-align: center;
   color: var(--accent);
+  border-bottom: none;
 }
 
-tr.group-start td {
-  border-top: 2px solid var(--border);
+th.period-start,
+td.period-start {
+  border-left: 2px solid var(--border);
+}
+
+/* Keep the 召會 / 區域 column visible while scrolling across periods. */
+.table-scroll thead th:first-child,
+.table-scroll tbody td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+  z-index: 1;
+  box-shadow: 2px 0 0 var(--border);
+  padding-right: 0.6rem;
+}
+
+.table-scroll tr.region-row td:first-child {
+  background: var(--surface-2);
 }
 
 .stat-tile .stat-value.multi {
