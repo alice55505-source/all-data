@@ -52,6 +52,19 @@
 
 「各召會結果」會依區域分組：每個區域最上面一列是該區域已上傳召會的**總計**（把區域內每個召會的數字加總，週數例外——週數顯示的是平均週數，僅供參考），底下再列出區域內每個召會自己的數字。表格可以按「下載 Excel」匯出成 `.xlsx` 檔（欄位跟畫面上顯示的一致，含區域總計列）。全台總計卡片維持加總全部已上傳召會的邏輯，不受區域分組影響。
 
+### 週別區間（自選分組，例如分月份）
+
+週報只有週別代碼（例如 `2026W28`），沒有日期，所以由使用者自己決定哪幾週算一組：
+
+1. 上傳週報後，「週別區間」卡片會列出偵測到的所有週別。
+2. 點「設定週別分組」：
+   - 「快速分組」輸入每組週數，例如 `4,5` = 前 4 週一組、後 5 週一組；
+   - 或手動「＋ 新增組別」，再替每一週選擇組別：某週選了某組，後面的週會自動跟著變成同一組（例如第 5 週改成「10月」，第 6 週以後也都變成「10月」，需要再分就往後繼續改）；設「不使用」只排除那一週；
+   - 組別可自訂名稱（例如「8月」「9月」）。
+3. 儲存後，在「統計區間」下拉選單選一個組別，結果表、區域總計、全台總計、下載 Excel 都會改成該組週別的週平均（該組各週數字加總 ÷ 該召會實際有資料的週數）。選「全部週」則維持原本報表自帶的「N 週平均」。
+
+分組設定整個房間共用；選哪個區間檢視則是各自的畫面。此功能需要逐週資料，此功能上線前上傳的召會要重新上傳一次才能套用區間（畫面會列出是哪些召會）。
+
 ## 安裝為 App（PWA）
 
 以 HTTPS 部署後，桌面或手機瀏覽器可將此頁面「加入主畫面 / 安裝應用程式」，離線後仍可開啟介面（但需要連線才能讀寫房間資料）。
@@ -60,7 +73,7 @@
 
 - 前端：純靜態網頁（`index.html` / `css/style.css` / `js/app.js`），不需建置流程。
 - 後端：Cloudflare Pages Functions（`functions/api/rooms/`），呼叫 Cloudflare D1 資料庫。
-- 每個房間是 D1 `rooms` 表裡的一列：`name` 是房間名稱、`groups_json` 是召會分組、`metrics_json` 是這個房間目前勾選的統計欄位設定（`{meetings:[...], roles:[...], extras:[...]}`）、`stats_json` 是每個召會上傳週報後解析出的原始「聚會類別｜身份」每週平均值（`{congregation: {weeks, sums: {"主日|國小": 12, ...}, fileName, updatedAt}}`），都是 JSON 字串。統計欄位設定改變時不需要重新上傳 —— 每次都是從存好的原始 `sums` 即時算出目前勾選欄位的數字。
+- 每個房間是 D1 `rooms` 表裡的一列：`name` 是房間名稱、`groups_json` 是召會分組、`metrics_json` 是這個房間目前勾選的統計欄位設定（`{meetings:[...], roles:[...], extras:[...]}`）、`stats_json` 是每個召會上傳週報後解析出的原始「聚會類別｜身份」每週平均值與逐週數字（`{congregation: {weeks, sums: {"主日|國小": 12, ...}, weekly: {"2026W28": {...}, ...}, fileName, updatedAt}}`）、`periods_json` 是週別分組，都是 JSON 字串。統計欄位設定改變時不需要重新上傳 —— 每次都是從存好的原始 `sums` 即時算出目前勾選欄位的數字。
 
 上傳、移除召會、清除全部、改房間名稱、改統計欄位，都是各自獨立的 API（`PUT/DELETE /api/rooms/:id/congregations/:name`、`POST /api/rooms/:id/reset`、`PATCH /api/rooms/:id/name`、`PUT /api/rooms/:id/metrics`），伺服器收到請求時才讀取當下最新的資料做修改再寫回去，不是前端把整包資料整個蓋過去。這樣兩個人幾乎同時上傳不同召會時，才不會其中一人的存檔把另一人的蓋掉。只有「設定召會清單」是整批覆蓋（`PUT /api/rooms/:id/groups`），因為這是特意的、低頻率的整批編輯動作。
 
@@ -115,6 +128,8 @@ npx wrangler d1 execute all-children-db --remote --file=./migrations/0002_add_ro
 npx wrangler d1 execute all-children-db --remote --file=./migrations/0003_add_room_metrics.sql
 ```
 
+`0004_add_room_periods.sql`（週別分組欄位）可以不用手動套用：第一次儲存週別分組時，伺服器會自動補上這個欄位。
+
 `--remote` 是操作正式環境的資料庫，請確認檔名是還沒套用過的再執行（同一個 migration 執行兩次通常不會出錯，`ALTER TABLE ... ADD COLUMN` 例外——欄位已存在時會報錯，屬正常現象，代表已經套用過了）。
 
 > **注意**：`0003_add_room_metrics.sql` 上線的同時，`stats_json` 的儲存格式也從「已經算好的兒童／青職固定欄位」改成「每個召會上傳週報後解析出的原始聚會×身份數字」，這個轉換無法回推——所有房間裡「這次改版之前」已上傳的召會資料都需要重新上傳一次 Excel 檔才會恢復有數字，純粹改資料庫欄位沒辦法救回來。
@@ -142,6 +157,7 @@ functions/api/rooms/[id].js                          GET /api/rooms/:id（讀取
 functions/api/rooms/[id]/name.js                     PATCH /api/rooms/:id/name（設定房間名稱）
 functions/api/rooms/[id]/groups.js                   PUT /api/rooms/:id/groups（整批覆蓋召會清單）
 functions/api/rooms/[id]/metrics.js                  PUT /api/rooms/:id/metrics（整批覆蓋統計欄位設定）
+functions/api/rooms/[id]/periods.js                  PUT /api/rooms/:id/periods（整批覆蓋週別分組）
 functions/api/rooms/[id]/reset.js                    POST /api/rooms/:id/reset（清除全部統計資料）
 functions/api/rooms/[id]/congregations/[name].js     PUT/DELETE /api/rooms/:id/congregations/:name（單一召會的存檔／移除）
 schema.sql                                           D1 資料表結構（新建資料庫用）

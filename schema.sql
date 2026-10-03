@@ -5,5 +5,6 @@ CREATE TABLE IF NOT EXISTS rooms (
   groups_json TEXT NOT NULL DEFAULT '[]',
   stats_json TEXT NOT NULL DEFAULT '{}',
   metrics_json TEXT NOT NULL DEFAULT '{"meetings":[],"roles":[],"extras":[]}',
+  periods_json TEXT NOT NULL DEFAULT '[]',
   updated_at TEXT NOT NULL
 );

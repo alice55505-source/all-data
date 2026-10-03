@@ -97,6 +97,19 @@
   </section>
 
   <section class="card">
+    <h2>週別區間 <span class="badge">自選哪幾週一組，例如分成不同月份</span></h2>
+    <div class="field">
+      <label for="period-select">統計區間</label>
+      <select id="period-select"></select>
+    </div>
+    <p class="modal-hint" id="period-detected"></p>
+    <div class="card-actions">
+      <button class="btn-secondary" id="open-period-btn">設定週別分組</button>
+    </div>
+    <div class="summary-warn" id="period-warn" style="display:none;"></div>
+  </section>
+
+  <section class="card">
     <h2>2. 上傳進度</h2>
     <div class="progress-row">
       <span>已上傳召會</span>
@@ -109,7 +122,7 @@
   </section>
 
   <section class="card">
-    <h2>3. 各召會結果 <span class="badge">依區域分組，區域列為該區總計</span></h2>
+    <h2>3. 各召會結果 <span class="badge">依區域分組，區域列為該區總計</span> <span class="badge" data-period-badge style="display:none;"></span></h2>
     <div class="table-scroll">
       <table>
         <thead><tr id="stats-results-thead-row"></tr></thead>
@@ -123,7 +136,7 @@
   </section>
 
   <section class="card">
-    <h2>4. 全台總計</h2>
+    <h2>4. 全台總計 <span class="badge" data-period-badge style="display:none;"></span></h2>
     <div class="summary-grid" id="stats-summary-grid"></div>
     <div class="summary-warn" id="stats-summary-warn" style="display:none;"></div>
   </section>
@@ -198,6 +211,36 @@
       <div class="modal-actions-right">
         <button class="btn-secondary" id="metrics-settings-cancel-btn">取消</button>
         <button class="btn-primary" id="metrics-settings-save-btn">儲存並套用</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="period-backdrop" style="display:none;">
+  <div class="modal">
+    <h2>設定週別分組</h2>
+    <p class="modal-hint">先建立組別並命名（例如「8月」「9月」），再替每一週選擇所屬組別（選了某組後，後面的週會自動跟著改成同一組，再往後調整即可）。每組的週平均 = 該組各週數字加總 ÷ 週數。分組設定整個房間共用。</p>
+    <div class="field">
+      <label for="period-quick-input">快速分組：依序填每組週數</label>
+      <div class="join-room-row">
+        <input type="text" id="period-quick-input" placeholder="例如 4,5（前 4 週一組、後 5 週一組）" />
+        <button class="btn-secondary" id="period-quick-btn">套用</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>組別</label>
+      <div id="period-groups"></div>
+      <button class="btn-secondary" id="period-add-btn" style="margin-top:0.4rem;">＋ 新增組別</button>
+    </div>
+    <div class="field">
+      <label>各週所屬組別</label>
+      <div id="period-weeks"></div>
+    </div>
+    <div class="modal-actions">
+      <span></span>
+      <div class="modal-actions-right">
+        <button class="btn-secondary" id="period-cancel-btn">取消</button>
+        <button class="btn-primary" id="period-save-btn">儲存並套用</button>
       </div>
     </div>
   </div>
