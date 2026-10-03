@@ -435,6 +435,11 @@
 
   // Averages the stored per-week values over the given weeks (only the
   // ones this congregation actually has). Returns null if none match.
+  //
+  // Mirrors how the report's own "N 週平均" block is computed (verified
+  // column-by-column against real exports): each category|age column is
+  // round(sum / weeks) to an integer, and a category's 小計 is the sum of
+  // its already-rounded age columns rather than a rounded mean of its own.
   function scanForWeeks(weekly, weeks) {
     var present = weeks.filter(function (w) { return weekly && weekly[w]; });
     if (!present.length) return null;
@@ -444,7 +449,21 @@
         sums[k] = (sums[k] || 0) + weekly[w][k];
       });
     });
-    Object.keys(sums).forEach(function (k) { sums[k] = sums[k] / present.length; });
+    Object.keys(sums).forEach(function (k) { sums[k] = Math.round(sums[k] / present.length); });
+
+    var componentTotals = {};
+    Object.keys(sums).forEach(function (k) {
+      var parts = k.split("|");
+      if (parts[1] === "小計") return;
+      componentTotals[parts[0]] = (componentTotals[parts[0]] || 0) + sums[k];
+    });
+    Object.keys(sums).forEach(function (k) {
+      var parts = k.split("|");
+      // Categories with no age breakdown (e.g. 兒童) keep their own rounded mean.
+      if (parts[1] === "小計" && componentTotals.hasOwnProperty(parts[0])) {
+        sums[k] = componentTotals[parts[0]];
+      }
+    });
     return { weeks: present.length, sums: sums };
   }
 
