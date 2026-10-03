@@ -132,6 +132,34 @@
   var PERIODS = [];
   var ROOM_ID = null;
 
+  // Per-device memory so a refresh or reopening the app returns to where
+  // the user left off: last room, and per room the checked periods and the
+  // congregation picked for upload. Storage can be unavailable (private
+  // mode, blocked site data), so every access is best-effort.
+  var LAST_ROOM_KEY = "allstats:lastRoom";
+
+  function loadPref(key) {
+    try {
+      var raw = window.localStorage.getItem(key);
+      return raw == null ? null : JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function savePref(key, value) {
+    try {
+      if (value == null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      /* storage unavailable - just don't remember */
+    }
+  }
+
+  function roomPrefKey(name) {
+    return "allstats:room:" + ROOM_ID + ":" + name;
+  }
+
   var TOTAL_LABEL = "合計";
 
   function getSheet(workbook, preferredName, fallbackIndex) {
@@ -808,7 +836,8 @@
     };
 
     // Keys of the periods being shown; "" = 全部週 (report's own average).
-    var selected = [""];
+    var savedSelection = loadPref(roomPrefKey("periods"));
+    var selected = Array.isArray(savedSelection) && savedSelection.length ? savedSelection : [""];
     var optionsSignature = null;
     var draftNames = [];
     var draftAssign = {};
@@ -836,6 +865,7 @@
       els.options.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
         if (cb.checked) selected.push(cb.value);
       });
+      savePref(roomPrefKey("periods"), selected);
     }
 
     function render(noWeekly) {
@@ -1097,6 +1127,10 @@
         });
         els.select.appendChild(optgroup);
       });
+      var savedCongregation = loadPref(roomPrefKey("congregation"));
+      if (savedCongregation && CONGREGATIONS.indexOf(savedCongregation) !== -1) {
+        els.select.value = savedCongregation;
+      }
     }
 
     function handleFileSelected(file) {
@@ -1272,6 +1306,9 @@
     initSelect();
     setupDropzone();
     els.parseBtn.addEventListener("click", onParseClick);
+    els.select.addEventListener("change", function () {
+      savePref(roomPrefKey("congregation"), els.select.value);
+    });
     els.resetAllBtn.addEventListener("click", onResetAllClick);
     statsSection.bindDownloadButton();
 
@@ -1554,6 +1591,7 @@
     });
 
     leaveBtn.addEventListener("click", function () {
+      savePref(LAST_ROOM_KEY, null);
       var url = new URL(window.location.href);
       url.search = "";
       window.location.href = url.toString();
@@ -1647,6 +1685,11 @@
     function boot() {
       ROOM_ID = getRoomIdFromUrl();
       if (!ROOM_ID) {
+        var lastRoom = loadPref(LAST_ROOM_KEY);
+        if (typeof lastRoom === "string" && lastRoom) {
+          goToRoom(lastRoom);
+          return;
+        }
         landing.style.display = "";
         return;
       }
@@ -1661,6 +1704,7 @@
         roomBar.style.display = "flex";
         appMain.style.display = "";
         roomCodeDisplay.textContent = ROOM_ID;
+        savePref(LAST_ROOM_KEY, ROOM_ID);
 
         applyRoomData(data);
         startPolling();
@@ -1671,6 +1715,8 @@
         createBtn.disabled = false;
         joinBtn.disabled = false;
         if (err.notFound) {
+          // Don't keep bouncing back into a room that no longer exists.
+          if (loadPref(LAST_ROOM_KEY) === ROOM_ID) savePref(LAST_ROOM_KEY, null);
           showLandingStatus("找不到房間代碼「" + ROOM_ID + "」，請確認代碼或建立新房間。", "error");
         } else {
           showLandingStatus("連線失敗：" + err.message, "error");
