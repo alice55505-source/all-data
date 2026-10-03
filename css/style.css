@@ -578,6 +578,39 @@ td.congregation-name {
   padding: 0.4rem 0.7rem;
 }
 
+td.period-cell {
+  text-align: left;
+  color: var(--text-muted);
+}
+
+tr.region-row td.period-cell {
+  color: var(--accent);
+}
+
+tr.group-start td {
+  border-top: 2px solid var(--border);
+}
+
+.stat-tile .stat-value.multi {
+  font-size: 1rem;
+  text-align: left;
+}
+
+.stat-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.stat-line span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.stat-line b {
+  font-size: 1.25rem;
+}
+
 .period-group-row,
 .period-week-row {
   display: flex;
