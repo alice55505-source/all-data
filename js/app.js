@@ -523,8 +523,14 @@
 
     var metrics = [];
 
+    // Each view is one period being shown: { label, state }. With more than
+    // one view the table gains a 區間 column and every congregation/region
+    // gets one row per period, so months can be compared side by side.
+    var views = [];
+    function multi() { return views.length > 1; }
+
     function initTableHeader() {
-      var html = "<th>召會 / 區域</th><th>週數</th>";
+      var html = "<th>召會 / 區域</th>" + (multi() ? "<th>區間</th>" : "") + "<th>週數</th>";
       metrics.forEach(function (m) { html += "<th>" + m.label + "</th>"; });
       els.resultsTheadRow.innerHTML = html;
     }
@@ -541,12 +547,16 @@
       els.summaryGrid.innerHTML = html;
     }
 
-    function renderChecklist(state) {
+    function hasInAnyView(name) {
+      return views.some(function (v) { return Object.prototype.hasOwnProperty.call(v.state, name); });
+    }
+
+    function renderChecklist() {
       var uploadedCount = 0;
       els.chipGrid.innerHTML = "";
       CONGREGATIONS.forEach(function (name) {
         var chip = document.createElement("span");
-        var done = Object.prototype.hasOwnProperty.call(state, name);
+        var done = hasInAnyView(name);
         if (done) uploadedCount++;
         chip.className = "chip" + (done ? " done" : "");
         chip.textContent = name;
@@ -576,25 +586,37 @@
       return total;
     }
 
-    function buildRows(state) {
+    function buildRows() {
       var out = [];
       CONGREGATION_GROUPS.forEach(function (group) {
-        var uploaded = group.members.filter(function (name) {
-          return Object.prototype.hasOwnProperty.call(state, name);
-        });
+        var uploaded = group.members.filter(hasInAnyView);
         if (!uploaded.length) return;
-        var entries = uploaded.map(function (name) { return state[name]; });
         uploaded.forEach(function (name) {
-          out.push({ type: "congregation", name: name, data: state[name] });
+          var first = true;
+          views.forEach(function (v) {
+            if (!Object.prototype.hasOwnProperty.call(v.state, name)) return;
+            out.push({ type: "congregation", name: name, period: v.label, first: first, data: v.state[name] });
+            first = false;
+          });
         });
-        out.push({ type: "region", region: group.region, data: regionTotalRow(entries) });
+        views.forEach(function (v) {
+          var entries = uploaded
+            .filter(function (name) { return Object.prototype.hasOwnProperty.call(v.state, name); })
+            .map(function (name) { return v.state[name]; });
+          if (!entries.length) return;
+          out.push({ type: "region", region: group.region, period: v.label, data: regionTotalRow(entries) });
+        });
       });
       return out;
     }
 
-    function renderTable(state, onRemove) {
+    function rowValue(r, m) {
+      return r.type === "region" ? r.data[m.key] : metricValue(r.data, m);
+    }
+
+    function renderTable(onRemove) {
       els.resultsTbody.innerHTML = "";
-      var rowsData = buildRows(state);
+      var rowsData = buildRows();
 
       els.resultsEmpty.style.display = rowsData.length ? "none" : "block";
       els.resultsEmpty.textContent = metrics.length
@@ -605,15 +627,18 @@
       rowsData.forEach(function (r) {
         var tr = document.createElement("tr");
         var html;
+        var periodCell = multi() ? "<td class=\"period-cell\">" + r.period + "</td>" : "";
         if (r.type === "region") {
           tr.className = "region-row";
-          html = "<td>" + r.region + "</td><td>" + formatNum(r.data.weeks) + "</td>";
-          metrics.forEach(function (m) { html += "<td>" + formatNum(r.data[m.key]) + "</td>"; });
+          html = "<td>" + r.region + "</td>" + periodCell + "<td>" + formatNum(r.data.weeks) + "</td>";
+          metrics.forEach(function (m) { html += "<td>" + formatNum(rowValue(r, m)) + "</td>"; });
           html += "<td></td>";
         } else {
-          html = "<td class=\"congregation-name\">" + r.name + "</td><td>" + r.data.weeks + "</td>";
-          metrics.forEach(function (m) { html += "<td>" + formatNum(metricValue(r.data, m)) + "</td>"; });
-          html += "<td><button class=\"btn-danger-ghost\" data-remove=\"" + r.name + "\">移除</button></td>";
+          if (multi() && r.first) tr.className = "group-start";
+          var nameText = r.first ? r.name : "";
+          html = "<td class=\"congregation-name\">" + nameText + "</td>" + periodCell + "<td>" + r.data.weeks + "</td>";
+          metrics.forEach(function (m) { html += "<td>" + formatNum(rowValue(r, m)) + "</td>"; });
+          html += "<td>" + (r.first ? "<button class=\"btn-danger-ghost\" data-remove=\"" + r.name + "\">移除</button>" : "") + "</td>";
         }
         tr.innerHTML = html;
         els.resultsTbody.appendChild(tr);
@@ -626,22 +651,31 @@
       });
     }
 
-    function renderSummary(state) {
-      var totals = {};
-      metrics.forEach(function (m) { totals[m.key] = 0; });
-      Object.keys(state).forEach(function (name) {
-        var d = state[name];
-        metrics.forEach(function (m) { totals[m.key] += metricValue(d, m); });
+    function renderSummary() {
+      var totalsPerView = views.map(function (v) {
+        var totals = {};
+        metrics.forEach(function (m) { totals[m.key] = 0; });
+        Object.keys(v.state).forEach(function (name) {
+          metrics.forEach(function (m) { totals[m.key] += metricValue(v.state[name], m); });
+        });
+        return totals;
       });
 
       metrics.forEach(function (m) {
         var el = document.getElementById(prefix + "-total-" + m.key);
-        if (el) el.textContent = formatNum(totals[m.key]);
+        if (!el) return;
+        if (multi()) {
+          el.classList.add("multi");
+          el.innerHTML = views.map(function (v, i) {
+            return '<div class="stat-line"><span>' + v.label + "</span><b>" + formatNum(totalsPerView[i][m.key]) + "</b></div>";
+          }).join("");
+        } else {
+          el.classList.remove("multi");
+          el.textContent = formatNum(totalsPerView.length ? totalsPerView[0][m.key] : 0);
+        }
       });
 
-      var missing = CONGREGATIONS.filter(function (name) {
-        return !Object.prototype.hasOwnProperty.call(state, name);
-      });
+      var missing = CONGREGATIONS.filter(function (name) { return !hasInAnyView(name); });
 
       if (missing.length) {
         els.summaryWarn.style.display = "block";
@@ -652,25 +686,24 @@
       }
     }
 
-    function onDownloadClick(state, periodName) {
-      var rowsData = buildRows(state);
+    function onDownloadClick() {
+      var rowsData = buildRows();
       if (!rowsData.length) return;
 
-      var header = ["召會 / 區域", "週數"].concat(metrics.map(function (m) { return m.label; }));
+      var header = ["召會 / 區域"].concat(multi() ? ["區間"] : [], ["週數"], metrics.map(function (m) { return m.label; }));
       var aoa = [header];
       rowsData.forEach(function (r) {
         var label = r.type === "region" ? r.region : r.name;
-        var row = [label, formatNum(r.data.weeks)];
-        metrics.forEach(function (m) {
-          row.push(formatNum(r.type === "region" ? r.data[m.key] : metricValue(r.data, m)));
-        });
+        var row = [label].concat(multi() ? [r.period] : [], [formatNum(r.data.weeks)]);
+        metrics.forEach(function (m) { row.push(formatNum(rowValue(r, m))); });
         aoa.push(row);
       });
 
       var ws = XLSX.utils.aoa_to_sheet(aoa);
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, summaryTitle);
-      var suffix = periodName ? "-" + periodName.replace(/[\\/:*?"<>|]/g, "_") : "";
+      var periodName = views.map(function (v) { return v.label; }).join("_");
+      var suffix = views.length === 1 && views[0].isAll ? "" : "-" + periodName.replace(/[\\/:*?"<>|]/g, "_");
       XLSX.writeFile(wb, fileBaseName + suffix + ".xlsx");
     }
 
@@ -680,15 +713,16 @@
         initTableHeader();
         initSummaryGrid();
       },
-      renderAll: function (state, onRemove) {
-        renderChecklist(state);
-        renderTable(state, onRemove);
-        renderSummary(state);
+      renderAll: function (newViews, onRemove) {
+        var wasMulti = multi();
+        views = newViews;
+        if (wasMulti !== multi()) initTableHeader();
+        renderChecklist();
+        renderTable(onRemove);
+        renderSummary();
       },
-      bindDownloadButton: function (getState, getPeriodName) {
-        els.downloadBtn.addEventListener("click", function () {
-          onDownloadClick(getState(), getPeriodName());
-        });
+      bindDownloadButton: function () {
+        els.downloadBtn.addEventListener("click", onDownloadClick);
       }
     };
   }
@@ -707,7 +741,7 @@
 
   function createPeriodPanel(onChange) {
     var els = {
-      select: document.getElementById("period-select"),
+      options: document.getElementById("period-options"),
       detected: document.getElementById("period-detected"),
       warn: document.getElementById("period-warn"),
       openBtn: document.getElementById("open-period-btn"),
@@ -721,53 +755,84 @@
       saveBtn: document.getElementById("period-save-btn")
     };
 
-    var selectedName = "";
+    // Keys of the periods being shown; "" = 全部週 (report's own average).
+    var selected = [""];
     var optionsSignature = null;
     var draftNames = [];
     var draftAssign = {};
     var draftWeeks = [];
 
-    function getActivePeriod() {
+    function periodByName(name) {
       for (var i = 0; i < PERIODS.length; i++) {
-        if (PERIODS[i].name === selectedName) return PERIODS[i];
+        if (PERIODS[i].name === name) return PERIODS[i];
       }
       return null;
     }
 
+    // Selected periods in display order (全部週 first, then as configured).
+    function getSelectedPeriods() {
+      var out = [];
+      if (selected.indexOf("") !== -1) out.push(null);
+      PERIODS.forEach(function (p) {
+        if (selected.indexOf(p.name) !== -1) out.push(p);
+      });
+      return out;
+    }
+
+    function readChecked() {
+      selected = [];
+      els.options.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+        if (cb.checked) selected.push(cb.value);
+      });
+    }
+
     function render(noWeekly) {
-      if (!getActivePeriod()) selectedName = "";
+      selected = selected.filter(function (k) { return k === "" || periodByName(k); });
+      if (!selected.length) selected = [""];
       // Background polling re-renders every few seconds; only rebuild the
-      // options when they actually changed so an open dropdown isn't reset.
+      // checkboxes when the periods actually changed.
       var signature = JSON.stringify(PERIODS);
       if (signature !== optionsSignature) {
         optionsSignature = signature;
-        els.select.innerHTML = "";
-        var all = document.createElement("option");
-        all.value = "";
-        all.textContent = "全部週（各召會報表自帶的週平均）";
-        els.select.appendChild(all);
-        PERIODS.forEach(function (p) {
-          var opt = document.createElement("option");
-          opt.value = p.name;
-          opt.textContent = p.name + "（" + describeWeeks(p.weeks) + "）";
-          els.select.appendChild(opt);
+        els.options.innerHTML = "";
+        var items = [{ value: "", text: "全部週（報表自帶的週平均）" }].concat(PERIODS.map(function (p) {
+          return { value: p.name, text: p.name + "（" + describeWeeks(p.weeks) + "）" };
+        }));
+        items.forEach(function (it) {
+          var label = document.createElement("label");
+          label.className = "checkbox-item";
+          var input = document.createElement("input");
+          input.type = "checkbox";
+          input.value = it.value;
+          input.addEventListener("change", function () {
+            readChecked();
+            onChange();
+          });
+          label.appendChild(input);
+          label.appendChild(document.createTextNode(it.text));
+          els.options.appendChild(label);
         });
       }
-      els.select.value = selectedName;
+      els.options.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+        cb.checked = selected.indexOf(cb.value) !== -1;
+      });
 
       var weeks = detectedWeeks();
       els.detected.textContent = weeks.length
         ? "已偵測到 " + weeks.length + " 週：" + weeks.join("、")
         : "尚未偵測到週別，請先上傳週報。";
 
-      if (selectedName && noWeekly && noWeekly.length) {
+      var usesPeriods = selected.some(function (k) { return k !== ""; });
+      if (usesPeriods && noWeekly && noWeekly.length) {
         els.warn.style.display = "block";
         els.warn.textContent = "以下召會是舊版上傳、沒有逐週資料，無法套用區間，請重新上傳：" + noWeekly.join("、");
       } else {
         els.warn.style.display = "none";
       }
 
-      var label = selectedName ? "區間：" + selectedName : "";
+      var label = usesPeriods || selected.length > 1
+        ? "區間：" + getSelectedPeriods().map(function (p) { return p ? p.name : "全部週"; }).join("、")
+        : "";
       document.querySelectorAll("[data-period-badge]").forEach(function (b) {
         b.textContent = label;
         b.style.display = label ? "" : "none";
@@ -913,10 +978,6 @@
       });
     }
 
-    els.select.addEventListener("change", function () {
-      selectedName = els.select.value;
-      onChange();
-    });
     els.openBtn.addEventListener("click", open);
     els.cancelBtn.addEventListener("click", close);
     els.backdrop.addEventListener("click", function (e) {
@@ -929,7 +990,7 @@
     els.quickBtn.addEventListener("click", applyQuickSplit);
     els.saveBtn.addEventListener("click", save);
 
-    return { render: render, getActivePeriod: getActivePeriod };
+    return { render: render, getSelectedPeriods: getSelectedPeriods };
   }
 
   function initUploadAndSections() {
@@ -1055,27 +1116,29 @@
     // The view the stats section renders: either the uploaded entries as-is
     // (report's own N-week average), or every entry re-averaged over the
     // weeks of the selected period.
-    function buildViewState() {
-      var period = periodPanel.getActivePeriod();
-      if (!period) return { state: dataState, noWeekly: [] };
-      var state = {};
+    function buildViews() {
       var noWeekly = [];
-      Object.keys(dataState).forEach(function (name) {
-        var entry = dataState[name];
-        if (!entry.weekly) {
-          noWeekly.push(name);
-          return;
-        }
-        var scan = scanForWeeks(entry.weekly, period.weeks);
-        if (scan) state[name] = { weeks: scan.weeks, sums: scan.sums };
+      var views = periodPanel.getSelectedPeriods().map(function (period) {
+        if (!period) return { label: "全部週", isAll: true, state: dataState };
+        var state = {};
+        Object.keys(dataState).forEach(function (name) {
+          var entry = dataState[name];
+          if (!entry.weekly) {
+            if (noWeekly.indexOf(name) === -1) noWeekly.push(name);
+            return;
+          }
+          var scan = scanForWeeks(entry.weekly, period.weeks);
+          if (scan) state[name] = { weeks: scan.weeks, sums: scan.sums };
+        });
+        return { label: period.name, state: state };
       });
-      return { state: state, noWeekly: noWeekly };
+      return { views: views, noWeekly: noWeekly };
     }
 
     function renderAll() {
-      var view = buildViewState();
-      periodPanel.render(view.noWeekly);
-      statsSection.renderAll(view.state, removeCongregation);
+      // render() first: it prunes selections whose period was deleted.
+      periodPanel.render(buildViews().noWeekly);
+      statsSection.renderAll(buildViews().views, removeCongregation);
     }
 
     function onParseClick() {
@@ -1158,13 +1221,7 @@
     setupDropzone();
     els.parseBtn.addEventListener("click", onParseClick);
     els.resetAllBtn.addEventListener("click", onResetAllClick);
-    statsSection.bindDownloadButton(
-      function () { return buildViewState().state; },
-      function () {
-        var p = periodPanel.getActivePeriod();
-        return p ? p.name : "";
-      }
-    );
+    statsSection.bindDownloadButton();
 
     applyMetrics();
 
