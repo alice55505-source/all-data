@@ -604,24 +604,15 @@ td.period-start {
   background: var(--surface-2);
 }
 
-.stat-tile .stat-value.multi {
-  font-size: 1rem;
-  text-align: left;
+.summary-table tbody td:not(:first-child) {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 
-.stat-line {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.stat-line span {
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.stat-line b {
-  font-size: 1.25rem;
+.summary-table thead th:not(:first-child) {
+  color: var(--accent);
 }
 
 .period-group-row,

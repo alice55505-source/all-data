@@ -680,19 +680,29 @@
         return totals;
       });
 
-      metrics.forEach(function (m) {
-        var el = document.getElementById(prefix + "-total-" + m.key);
-        if (!el) return;
-        if (multi()) {
-          el.classList.add("multi");
-          el.innerHTML = views.map(function (v, i) {
-            return '<div class="stat-line"><span>' + v.label + "</span><b>" + formatNum(totalsPerView[i][m.key]) + "</b></div>";
-          }).join("");
-        } else {
-          el.classList.remove("multi");
-          el.textContent = formatNum(totalsPerView.length ? totalsPerView[0][m.key] : 0);
-        }
-      });
+      if (multi()) {
+        // Periods side by side as columns, one row per stat, matching the
+        // left-to-right period order of the results table.
+        els.summaryGrid.className = "table-scroll";
+        var html = '<table class="summary-table"><thead><tr><th>統計欄位</th>';
+        views.forEach(function (v) { html += '<th class="period-start">' + v.label + "</th>"; });
+        html += "</tr></thead><tbody>";
+        metrics.forEach(function (m) {
+          html += "<tr><td>" + m.totalLabel + "</td>";
+          views.forEach(function (v, i) {
+            html += '<td class="period-start">' + formatNum(totalsPerView[i][m.key]) + "</td>";
+          });
+          html += "</tr>";
+        });
+        els.summaryGrid.innerHTML = html + "</tbody></table>";
+      } else {
+        els.summaryGrid.className = "summary-grid";
+        initSummaryGrid();
+        metrics.forEach(function (m) {
+          var el = document.getElementById(prefix + "-total-" + m.key);
+          if (el) el.textContent = formatNum(totalsPerView.length ? totalsPerView[0][m.key] : 0);
+        });
+      }
 
       var missing = CONGREGATIONS.filter(function (name) { return !hasInAnyView(name); });
 
