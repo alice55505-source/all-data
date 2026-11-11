@@ -1,4 +1,4 @@
-const CACHE_NAME = "stats-cache-v15";
+const CACHE_NAME = "stats-cache-v16";
 const APP_SHELL = [
   "./",
   "./index.html",
