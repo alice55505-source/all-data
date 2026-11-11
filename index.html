@@ -71,6 +71,13 @@
 
   <div id="app-main" style="display:none;">
 
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab-target="stats">週報統計</button>
+    <button class="tab-btn" data-tab-target="rollcall">點名</button>
+  </nav>
+
+  <div data-tab-panel="stats">
+
   <section class="card">
     <h2>1. 上傳報表 <span class="badge">選擇召會後上傳，套用目前設定的統計欄位</span></h2>
 
@@ -144,6 +151,81 @@
   <p class="tab-footnote">
     以上每個欄位皆為「週報網格」分頁中對應「聚會類別｜身份」的每週平均值（家聚會（出訪+受訪）為出訪、受訪兩欄相加）；要新增或調整欄位請點右上角「⚙ 設定統計欄位」。
   </p>
+
+  </div>
+
+  <div data-tab-panel="rollcall" style="display:none;">
+    <section class="card">
+      <h2>1. 上傳點名報表 <span class="badge">每月出席一次以上的人數</span></h2>
+
+      <div class="field">
+        <label for="rollcall-congregation-select">召會</label>
+        <select id="rollcall-congregation-select"></select>
+      </div>
+
+      <div class="field">
+        <label for="rollcall-file-input">點名報表 Excel 或 CSV 檔（.xlsx / .csv，含「出席」分頁）</label>
+        <div class="dropzone" id="rollcall-dropzone">
+          將檔案拖曳到這裡，或點擊選擇檔案
+          <input type="file" id="rollcall-file-input" accept=".xlsx,.csv" style="margin-top:0.6rem;" />
+        </div>
+        <div class="file-picked" id="rollcall-file-picked"></div>
+      </div>
+
+      <div class="upload-actions">
+        <button class="btn-primary" id="rollcall-parse-btn">解析並加入</button>
+        <button class="btn-secondary" id="rollcall-reset-btn">清除點名資料</button>
+      </div>
+
+      <div class="status-msg" id="rollcall-status-msg"></div>
+    </section>
+
+    <section class="card">
+      <h2>2. 上傳進度</h2>
+      <div class="progress-row">
+        <span>已上傳召會</span>
+        <span class="progress-count"><span id="rollcall-progress-count">0</span> / <span id="rollcall-progress-total">28</span></span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="rollcall-progress-bar" style="width:0%"></div>
+      </div>
+      <div class="chip-grid" id="rollcall-chip-grid"></div>
+    </section>
+
+    <section class="card">
+      <h2>3. 選擇群組</h2>
+      <div class="group-filter" id="rollcall-group-filter"></div>
+      <div class="group-filter-actions">
+        <button class="btn-secondary" id="rollcall-group-all-btn">全選</button>
+        <button class="btn-secondary" id="rollcall-group-none-btn">全不選</button>
+      </div>
+      <div class="empty-hint" id="rollcall-group-empty">上傳點名報表後會列出群組</div>
+    </section>
+
+    <section class="card">
+      <h2>4. 各召會結果 <span class="badge">每月出席 ≥1 次的人數，區域列為該區總計</span></h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr id="rollcall-results-thead-row"></tr></thead>
+          <tbody id="rollcall-results-tbody"></tbody>
+        </table>
+      </div>
+      <div class="empty-hint" id="rollcall-results-empty">尚未上傳任何召會的點名報表</div>
+      <div class="card-actions">
+        <button class="btn-secondary" id="rollcall-download-btn" disabled>下載 Excel</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>5. 全台總計</h2>
+      <div class="summary-grid" id="rollcall-summary-grid"></div>
+      <div class="summary-warn" id="rollcall-summary-warn" style="display:none;"></div>
+    </section>
+
+    <p class="tab-footnote">
+      讀取點名報表「出席」分頁：每週欄位為 1 視為出席。某人在該月份任一週出席，就算 1 人（同一人多次出席只算一次）。週別依該週的主日（週一日期 + 6 天）歸入月份。名單人數為所選群組在名單上的總人數。
+    </p>
+  </div>
 
   <footer class="app-footer">
     全台總計為已上傳召會之數值加總。資料儲存在這個房間專屬的雲端資料庫，只有知道房間代碼的人看得到。
