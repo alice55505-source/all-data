@@ -1819,6 +1819,7 @@
       btn.addEventListener("click", function () {
         var target = btn.getAttribute("data-tab-target");
         buttons.forEach(function (b) { b.classList.toggle("active", b === btn); });
+        document.body.classList.toggle("tab-rollcall", target === "rollcall");
         document.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
           panel.style.display = panel.getAttribute("data-tab-panel") === target ? "" : "none";
         });
