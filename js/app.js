@@ -736,8 +736,7 @@
 
       if (missing.length) {
         els.summaryWarn.style.display = "block";
-        els.summaryWarn.textContent =
-          "尚有 " + missing.length + " 個召會未上傳（" + missing.join("、") + "），以上總計僅計入已上傳的召會。";
+        els.summaryWarn.textContent = "尚有 " + missing.length + " 個召會未上傳";
       } else {
         els.summaryWarn.style.display = "none";
       }
@@ -1625,8 +1624,7 @@
     function renderGroupFilter() {
       var groups = allGroups();
       els.groupFilter.innerHTML = "";
-      els.groupEmpty.style.display = groups.length ? "none" : "block";
-      els.groupAllBtn.disabled = els.groupNoneBtn.disabled = !groups.length;
+      els.groupAllBtn.parentNode.style.display = groups.length ? "" : "none";
       groups.forEach(function (g) {
         var label = document.createElement("label");
         var cb = document.createElement("input");
@@ -1696,7 +1694,7 @@
       var missing = CONGREGATIONS.filter(function (n) { return !has(n); });
       if (missing.length) {
         els.summaryWarn.style.display = "block";
-        els.summaryWarn.textContent = "尚有 " + missing.length + " 個召會未上傳點名報表（" + missing.join("、") + "），以上總計僅計入已上傳的召會。";
+        els.summaryWarn.textContent = "尚有 " + missing.length + " 個召會未上傳";
       } else {
         els.summaryWarn.style.display = "none";
       }

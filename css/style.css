@@ -724,3 +724,43 @@ footer.app-footer {
   gap: 0.5rem;
   margin-top: 0.75rem;
 }
+
+/* ---- compact layout ---- */
+.upload-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+.upload-row select { flex: 0 1 12rem; min-width: 8rem; }
+.upload-row .dropzone {
+  flex: 1 1 14rem;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+.upload-row .dropzone input[type="file"] { margin: 0; width: 100%; }
+.upload-row + .file-picked:empty { display: none; }
+.upload-actions { margin-top: 0.75rem; }
+
+.progress-details { margin-top: 0.9rem; }
+.progress-details summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  list-style: none;
+}
+.progress-details summary::-webkit-details-marker { display: none; }
+.progress-details summary::after { content: "▾"; }
+.progress-details[open] summary::after { content: "▴"; }
+.progress-details summary .progress-bar-track { display: block; flex: 1; margin: 0; }
+.progress-details summary .progress-bar-fill { display: block; }
+.progress-details .chip-grid { margin-top: 0.75rem; }
+
+.group-filter-actions { margin: 0.6rem 0 0.9rem; }
+.card h2 { margin-bottom: 0.75rem; }
+.summary-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important; gap: 0.6rem; }
+.stat-tile { padding: 0.7rem 0.5rem; }
+.stat-tile .stat-value { font-size: 1.4rem; }
