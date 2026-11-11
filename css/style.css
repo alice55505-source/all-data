@@ -577,3 +577,34 @@ footer.app-footer {
   .summary-grid { grid-template-columns: 1fr; }
   thead th, tbody td { font-size: 0.82rem; }
 }
+
+.group-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.group-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.group-filter label.checked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.group-filter input { margin: 0; }
+
+.group-filter-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}

@@ -1,0 +1,1 @@
+ALTER TABLE rooms ADD COLUMN rollcall_json TEXT NOT NULL DEFAULT '{}';
