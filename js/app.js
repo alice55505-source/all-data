@@ -129,6 +129,7 @@
   var CONGREGATIONS = [];
   var METRICS_CONFIG = DEFAULT_METRICS_CONFIG;
   var dataState = {};
+  var rollcallState = {};
   var PERIODS = [];
   var ROOM_ID = null;
 
@@ -251,6 +252,33 @@
       body: JSON.stringify({ name: name })
     }).then(function (res) {
       if (!res.ok) throw new Error("命名失敗，請檢查網路連線");
+      return res.json();
+    });
+  }
+
+  function apiUpsertRollcall(id, name, entry) {
+    return fetch("/api/rooms/" + encodeURIComponent(id) + "/rollcall/" + encodeURIComponent(name), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry)
+    }).then(function (res) {
+      if (!res.ok) throw new Error("儲存失敗，請檢查網路連線（若剛更新版本，請確認資料庫已套用 migrations/0005）");
+      return res.json();
+    });
+  }
+
+  function apiDeleteRollcall(id, name) {
+    return fetch("/api/rooms/" + encodeURIComponent(id) + "/rollcall/" + encodeURIComponent(name), {
+      method: "DELETE"
+    }).then(function (res) {
+      if (!res.ok) throw new Error("刪除失敗，請檢查網路連線");
+      return res.json();
+    });
+  }
+
+  function apiResetRollcall(id) {
+    return fetch("/api/rooms/" + encodeURIComponent(id) + "/rollcall", { method: "DELETE" }).then(function (res) {
+      if (!res.ok) throw new Error("清除失敗，請檢查網路連線");
       return res.json();
     });
   }
@@ -1285,6 +1313,521 @@
     };
   }
 
+  // ---- 點名報表：每月出席一次以上的人數（可依群組篩選） ----
+
+  var ROLLCALL_SHEET_NAME = "出席";
+  var ROLLCALL_GROUP_ORDER = ["學齡前", "國小", "國中", "高中", "大學", "青職", "青壯", "中壯", "年長"];
+  var ROLLCALL_NO_GROUP = "未分組";
+  var DAY_MS = 86400000;
+
+  // Week columns are headed by the week's Monday ("2026-08-31"). Excel may
+  // also hand them over as real date cells (serial numbers) or "2026/8/31".
+  function parseWeekDate(cell) {
+    if (cell == null) return null;
+    if (typeof cell === "number") {
+      if (cell < 20000 || cell > 80000) return null;
+      return new Date(Date.UTC(1899, 11, 30) + Math.round(cell) * DAY_MS);
+    }
+    var m = String(cell).trim().match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+    if (!m) return null;
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  }
+
+  // A week belongs to the month its Lord's day (Monday + 6) falls in - this
+  // matches the report's own range, e.g. "2026年9月" starts at week 2026-08-31.
+  function weekMonthKey(monday) {
+    var sunday = new Date(monday.getTime() + 6 * DAY_MS);
+    var mm = sunday.getUTCMonth() + 1;
+    return sunday.getUTCFullYear() + "-" + (mm < 10 ? "0" : "") + mm;
+  }
+
+  function monthLabel(key) {
+    var parts = key.split("-");
+    return parts[0] + "年" + Number(parts[1]) + "月";
+  }
+
+  function isAttendedCell(v) {
+    if (v == null) return false;
+    if (typeof v === "number") return v > 0;
+    var t = String(v).trim();
+    if (!t) return false;
+    if (!isNaN(Number(t))) return Number(t) > 0;
+    return /^(v|✓|✔|○|o|y|yes|出席)$/i.test(t);
+  }
+
+  function parseRollcall(workbook) {
+    var sheet = getSheet(workbook, ROLLCALL_SHEET_NAME, 0);
+    if (!sheet) throw new Error("找不到「" + ROLLCALL_SHEET_NAME + "」分頁，請確認上傳的是點名報表");
+    var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+
+    var headerIdx = -1, nameCol = -1, groupCol = -1;
+    for (var r = 0; r < rows.length && headerIdx === -1; r++) {
+      var row = rows[r] || [];
+      for (var c = 0; c < row.length; c++) {
+        if (row[c] != null && String(row[c]).trim() === "姓名") {
+          headerIdx = r;
+          nameCol = c;
+          break;
+        }
+      }
+    }
+    if (headerIdx === -1) throw new Error("找不到「姓名」欄位，請確認上傳的是點名報表");
+
+    var header = rows[headerIdx];
+    var weekCols = [];
+    for (var c2 = 0; c2 < header.length; c2++) {
+      var label = header[c2] != null ? String(header[c2]).trim() : "";
+      if (label === "群組") groupCol = c2;
+      var d = parseWeekDate(header[c2]);
+      if (d) weekCols.push({ col: c2, month: weekMonthKey(d) });
+    }
+    if (!weekCols.length) throw new Error("找不到週別日期欄位（例如 2026-08-31）");
+
+    var months = {};
+    weekCols.forEach(function (w) {
+      if (!months[w.month]) months[w.month] = { weeks: 0, attended: {} };
+      months[w.month].weeks++;
+    });
+
+    var roster = {};
+    var people = 0;
+    for (var i = headerIdx + 1; i < rows.length; i++) {
+      var dr = rows[i];
+      if (!dr) continue;
+      var name = dr[nameCol];
+      if (name == null || String(name).trim() === "") continue;
+      var grp = groupCol !== -1 && dr[groupCol] != null && String(dr[groupCol]).trim() !== ""
+        ? String(dr[groupCol]).trim()
+        : ROLLCALL_NO_GROUP;
+      people++;
+      roster[grp] = (roster[grp] || 0) + 1;
+
+      var hitMonths = {};
+      weekCols.forEach(function (w) {
+        if (isAttendedCell(dr[w.col])) hitMonths[w.month] = true;
+      });
+      Object.keys(hitMonths).forEach(function (mk) {
+        var att = months[mk].attended;
+        att[grp] = (att[grp] || 0) + 1;
+      });
+    }
+    if (!people) throw new Error("「" + ROLLCALL_SHEET_NAME + "」分頁沒有任何名單資料");
+
+    var title = rows[0] && rows[0][0] != null ? String(rows[0][0]).trim() : "";
+    return { months: months, roster: roster, people: people, title: title };
+  }
+
+  function sortGroups(list) {
+    return list.slice().sort(function (a, b) {
+      var ia = ROLLCALL_GROUP_ORDER.indexOf(a), ib = ROLLCALL_GROUP_ORDER.indexOf(b);
+      if (ia === -1) ia = a === ROLLCALL_NO_GROUP ? 1000 : 999;
+      if (ib === -1) ib = b === ROLLCALL_NO_GROUP ? 1000 : 999;
+      if (ia !== ib) return ia - ib;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  }
+
+  function initRollcallSection() {
+    function $(name) { return document.getElementById("rollcall-" + name); }
+    var els = {
+      select: $("congregation-select"),
+      dropzone: $("dropzone"),
+      fileInput: $("file-input"),
+      filePicked: $("file-picked"),
+      parseBtn: $("parse-btn"),
+      resetBtn: $("reset-btn"),
+      statusMsg: $("status-msg"),
+      progressCount: $("progress-count"),
+      progressTotal: $("progress-total"),
+      progressBar: $("progress-bar"),
+      chipGrid: $("chip-grid"),
+      groupFilter: $("group-filter"),
+      groupEmpty: $("group-empty"),
+      groupAllBtn: $("group-all-btn"),
+      groupNoneBtn: $("group-none-btn"),
+      theadRow: $("results-thead-row"),
+      tbody: $("results-tbody"),
+      resultsEmpty: $("results-empty"),
+      downloadBtn: $("download-btn"),
+      summaryGrid: $("summary-grid"),
+      summaryWarn: $("summary-warn")
+    };
+
+    var pickedFile = null;
+    var pendingWrites = 0;
+    // Remembered per viewer (not shared): which groups this viewer unticked.
+    // Groups appearing for the first time are therefore ticked by default.
+    var storageKey = "rollcall-deselected-" + ROOM_ID;
+    var deselected = {};
+    try {
+      var saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      if (Array.isArray(saved)) saved.forEach(function (g) { deselected[g] = true; });
+    } catch (e) { /* storage unavailable - default to all groups */ }
+
+    function saveDeselected() {
+      try { localStorage.setItem(storageKey, JSON.stringify(Object.keys(deselected))); } catch (e) { /* ignore */ }
+    }
+
+    function trackWrite(promise) {
+      pendingWrites++;
+      var done = function () { pendingWrites--; };
+      promise.then(done, done);
+      return promise;
+    }
+
+    function showStatus(message, type) {
+      els.statusMsg.textContent = message;
+      els.statusMsg.className = "status-msg show " + type;
+    }
+
+    function has(name) { return Object.prototype.hasOwnProperty.call(rollcallState, name); }
+
+    function initSelect() {
+      var prev = els.select.value;
+      els.select.innerHTML = "";
+      if (!CONGREGATIONS.length) {
+        var placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "尚未設定召會，請先到設定新增";
+        els.select.appendChild(placeholder);
+        els.parseBtn.disabled = true;
+        return;
+      }
+      els.parseBtn.disabled = false;
+      CONGREGATION_GROUPS.forEach(function (group) {
+        var optgroup = document.createElement("optgroup");
+        optgroup.label = group.region;
+        group.members.forEach(function (name) {
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          optgroup.appendChild(opt);
+        });
+        els.select.appendChild(optgroup);
+      });
+      if (prev && CONGREGATIONS.indexOf(prev) !== -1) els.select.value = prev;
+    }
+
+    function handleFileSelected(file) {
+      pickedFile = file;
+      els.filePicked.textContent = file ? "已選擇檔案：" + file.name : "";
+    }
+
+    function setupDropzone() {
+      var dz = els.dropzone;
+      ["dragenter", "dragover"].forEach(function (evt) {
+        dz.addEventListener(evt, function (e) { e.preventDefault(); dz.classList.add("drag-over"); });
+      });
+      ["dragleave", "drop"].forEach(function (evt) {
+        dz.addEventListener(evt, function (e) { e.preventDefault(); dz.classList.remove("drag-over"); });
+      });
+      dz.addEventListener("drop", function (e) {
+        var files = e.dataTransfer.files;
+        if (files && files.length) handleFileSelected(files[0]);
+      });
+      els.fileInput.addEventListener("change", function (e) {
+        if (e.target.files && e.target.files.length) handleFileSelected(e.target.files[0]);
+      });
+    }
+
+    function visibleNames() {
+      return CONGREGATIONS.filter(has);
+    }
+
+    function allGroups() {
+      var seen = {};
+      visibleNames().forEach(function (name) {
+        Object.keys(rollcallState[name].roster || {}).forEach(function (g) { seen[g] = true; });
+      });
+      return sortGroups(Object.keys(seen));
+    }
+
+    function selectedGroups() {
+      return allGroups().filter(function (g) { return !deselected[g]; });
+    }
+
+    function allMonths() {
+      var seen = {};
+      visibleNames().forEach(function (name) {
+        Object.keys(rollcallState[name].months || {}).forEach(function (m) { seen[m] = true; });
+      });
+      return Object.keys(seen).sort();
+    }
+
+    // { roster, months: { key: count | null } } for one entry, summed over
+    // the selected groups. null = this report doesn't cover that month.
+    function extract(entry, groups, months) {
+      var out = { roster: 0, months: {} };
+      groups.forEach(function (g) { out.roster += (entry.roster && entry.roster[g]) || 0; });
+      months.forEach(function (mk) {
+        var m = entry.months && entry.months[mk];
+        if (!m) { out.months[mk] = null; return; }
+        var n = 0;
+        groups.forEach(function (g) { n += (m.attended && m.attended[g]) || 0; });
+        out.months[mk] = n;
+      });
+      return out;
+    }
+
+    function sumRows(list, months) {
+      var total = { roster: 0, months: {} };
+      months.forEach(function (mk) { total.months[mk] = null; });
+      list.forEach(function (d) {
+        total.roster += d.roster;
+        months.forEach(function (mk) {
+          if (d.months[mk] == null) return;
+          total.months[mk] = (total.months[mk] || 0) + d.months[mk];
+        });
+      });
+      return total;
+    }
+
+    function buildRows(groups, months) {
+      var out = [];
+      CONGREGATION_GROUPS.forEach(function (group) {
+        var uploaded = group.members.filter(has);
+        if (!uploaded.length) return;
+        var entries = [];
+        uploaded.forEach(function (name) {
+          var d = extract(rollcallState[name], groups, months);
+          entries.push(d);
+          out.push({ type: "congregation", name: name, data: d });
+        });
+        out.push({ type: "region", region: group.region, data: sumRows(entries, months) });
+      });
+      return out;
+    }
+
+    function cell(v) { return v == null ? "—" : String(v); }
+
+    function escapeHtml(t) {
+      return String(t).replace(/[&<>"]/g, function (ch) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch];
+      });
+    }
+
+    function renderChecklist() {
+      var count = 0;
+      els.chipGrid.innerHTML = "";
+      CONGREGATIONS.forEach(function (name) {
+        var chip = document.createElement("span");
+        var done = has(name);
+        if (done) count++;
+        chip.className = "chip" + (done ? " done" : "");
+        chip.textContent = name;
+        els.chipGrid.appendChild(chip);
+      });
+      els.progressCount.textContent = count;
+      els.progressTotal.textContent = CONGREGATIONS.length;
+      els.progressBar.style.width = (CONGREGATIONS.length ? count / CONGREGATIONS.length * 100 : 0) + "%";
+    }
+
+    function renderGroupFilter() {
+      var groups = allGroups();
+      els.groupFilter.innerHTML = "";
+      els.groupEmpty.style.display = groups.length ? "none" : "block";
+      els.groupAllBtn.disabled = els.groupNoneBtn.disabled = !groups.length;
+      groups.forEach(function (g) {
+        var label = document.createElement("label");
+        var cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = !deselected[g];
+        label.className = cb.checked ? "checked" : "";
+        cb.addEventListener("change", function () {
+          if (cb.checked) delete deselected[g]; else deselected[g] = true;
+          saveDeselected();
+          renderAll();
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(g));
+        els.groupFilter.appendChild(label);
+      });
+    }
+
+    function renderTable() {
+      var groups = selectedGroups();
+      var months = allMonths();
+      var rowsData = buildRows(groups, months);
+
+      var head = "<th>召會 / 區域</th><th>名單人數</th>";
+      months.forEach(function (mk) { head += "<th>" + monthLabel(mk) + "</th>"; });
+      head += "<th></th>";
+      els.theadRow.innerHTML = head;
+
+      els.tbody.innerHTML = "";
+      els.resultsEmpty.style.display = rowsData.length ? "none" : "block";
+      els.downloadBtn.disabled = !rowsData.length;
+
+      rowsData.forEach(function (r) {
+        var tr = document.createElement("tr");
+        var html;
+        if (r.type === "region") {
+          tr.className = "region-row";
+          html = "<td>" + escapeHtml(r.region) + "</td><td>" + r.data.roster + "</td>";
+          months.forEach(function (mk) { html += "<td>" + cell(r.data.months[mk]) + "</td>"; });
+          html += "<td></td>";
+        } else {
+          html = "<td class=\"congregation-name\">" + escapeHtml(r.name) + "</td><td>" + r.data.roster + "</td>";
+          months.forEach(function (mk) { html += "<td>" + cell(r.data.months[mk]) + "</td>"; });
+          html += "<td><button class=\"btn-danger-ghost\" data-rollcall-remove=\"" + escapeHtml(r.name) + "\">移除</button></td>";
+        }
+        tr.innerHTML = html;
+        els.tbody.appendChild(tr);
+      });
+
+      els.tbody.querySelectorAll("[data-rollcall-remove]").forEach(function (btn) {
+        btn.addEventListener("click", function () { removeCongregation(btn.getAttribute("data-rollcall-remove")); });
+      });
+    }
+
+    function renderSummary() {
+      var groups = selectedGroups();
+      var months = allMonths();
+      var total = sumRows(visibleNames().map(function (n) { return extract(rollcallState[n], groups, months); }), months);
+
+      var html = "";
+      months.forEach(function (mk) {
+        html += '<div class="stat-tile"><div class="stat-label">' + monthLabel(mk) + " 出席≥1次</div>" +
+          '<div class="stat-value">' + cell(total.months[mk]) + "</div></div>";
+      });
+      html += '<div class="stat-tile"><div class="stat-label">名單人數</div><div class="stat-value">' + total.roster + "</div></div>";
+      els.summaryGrid.innerHTML = html;
+
+      var missing = CONGREGATIONS.filter(function (n) { return !has(n); });
+      if (missing.length) {
+        els.summaryWarn.style.display = "block";
+        els.summaryWarn.textContent = "尚有 " + missing.length + " 個召會未上傳點名報表（" + missing.join("、") + "），以上總計僅計入已上傳的召會。";
+      } else {
+        els.summaryWarn.style.display = "none";
+      }
+    }
+
+    function renderAll() {
+      renderChecklist();
+      renderGroupFilter();
+      renderTable();
+      renderSummary();
+    }
+
+    function removeCongregation(name) {
+      if (!window.confirm("確定要移除「" + name + "」的點名資料嗎？")) return;
+      delete rollcallState[name];
+      renderAll();
+      trackWrite(apiDeleteRollcall(ROOM_ID, name)).catch(function (err) {
+        showStatus("移除失敗：" + err.message, "error");
+      });
+    }
+
+    function onParseClick() {
+      els.statusMsg.className = "status-msg";
+      var congregation = els.select.value;
+      if (!congregation) { showStatus("請先到設定新增召會", "error"); return; }
+      if (!pickedFile) { showStatus("請先選擇點名報表檔案", "error"); return; }
+      els.parseBtn.disabled = true;
+
+      pickedFile.arrayBuffer().then(function (buf) {
+        var parsed = parseRollcall(readWorkbook(buf));
+
+        if (has(congregation) && !window.confirm("「" + congregation + "」已經上傳過點名報表，是否要用這個新檔案覆蓋？")) {
+          els.parseBtn.disabled = false;
+          return;
+        }
+
+        var entry = {
+          months: parsed.months,
+          roster: parsed.roster,
+          title: parsed.title,
+          fileName: pickedFile.name,
+          updatedAt: new Date().toISOString()
+        };
+        rollcallState[congregation] = entry;
+        renderAll();
+
+        var summary = Object.keys(parsed.months).sort().map(function (mk) {
+          var n = 0;
+          Object.keys(parsed.months[mk].attended).forEach(function (g) { n += parsed.months[mk].attended[g]; });
+          return monthLabel(mk) + " " + n + " 人";
+        }).join("、");
+        showStatus("已加入「" + congregation + "」：名單 " + parsed.people + " 人；出席≥1次（全部群組）— " + summary + "（儲存中…）", "ok");
+
+        pickedFile = null;
+        els.fileInput.value = "";
+        els.filePicked.textContent = "";
+        els.parseBtn.disabled = false;
+
+        trackWrite(apiUpsertRollcall(ROOM_ID, congregation, entry)).then(function () {
+          showStatus("已加入「" + congregation + "」：名單 " + parsed.people + " 人；出席≥1次（全部群組）— " + summary + "。已儲存到房間。", "ok");
+        }).catch(function (err) {
+          showStatus("已加入「" + congregation + "」，但儲存失敗：" + err.message, "error");
+        });
+      }).catch(function (err) {
+        showStatus("解析失敗：" + err.message, "error");
+        els.parseBtn.disabled = false;
+      });
+    }
+
+    function onResetClick() {
+      if (!Object.keys(rollcallState).length) return;
+      if (!window.confirm("確定要清除所有召會的點名資料嗎？（兒童、青職資料不受影響，此操作無法復原）")) return;
+      rollcallState = {};
+      renderAll();
+      trackWrite(apiResetRollcall(ROOM_ID)).catch(function (err) {
+        showStatus("清除失敗：" + err.message, "error");
+      });
+    }
+
+    function onDownloadClick() {
+      var groups = selectedGroups();
+      var months = allMonths();
+      var rowsData = buildRows(groups, months);
+      if (!rowsData.length) return;
+      var aoa = [["群組：" + (groups.length ? groups.join("、") : "（未選擇）")]];
+      aoa.push(["召會 / 區域", "名單人數"].concat(months.map(function (mk) { return monthLabel(mk) + " 出席≥1次"; })));
+      rowsData.forEach(function (r) {
+        var row = [r.type === "region" ? r.region : r.name, r.data.roster];
+        months.forEach(function (mk) { row.push(r.data.months[mk] == null ? "" : r.data.months[mk]); });
+        aoa.push(row);
+      });
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), "點名出席統計");
+      XLSX.writeFile(wb, "rollcall-stats.xlsx");
+    }
+
+    function setAll(on) {
+      allGroups().forEach(function (g) { if (on) delete deselected[g]; else deselected[g] = true; });
+      saveDeselected();
+      renderAll();
+    }
+
+    initSelect();
+    setupDropzone();
+    els.parseBtn.addEventListener("click", onParseClick);
+    els.resetBtn.addEventListener("click", onResetClick);
+    els.downloadBtn.addEventListener("click", onDownloadClick);
+    els.groupAllBtn.addEventListener("click", function () { setAll(true); });
+    els.groupNoneBtn.addEventListener("click", function () { setAll(false); });
+    renderAll();
+
+    return {
+      initSelect: initSelect,
+      renderAll: renderAll,
+      hasPendingWrites: function () { return pendingWrites > 0; }
+    };
+  }
+
+  function initTabs() {
+    var buttons = document.querySelectorAll("[data-tab-target]");
+    buttons.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var target = btn.getAttribute("data-tab-target");
+        buttons.forEach(function (b) { b.classList.toggle("active", b === btn); });
+        document.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
+          panel.style.display = panel.getAttribute("data-tab-panel") === target ? "" : "none";
+        });
+      });
+    });
+  }
+
   function groupsToText(groups) {
     return groups.map(function (g) {
       return g.region + "\n" + g.members.map(function (m) { return "  " + m; }).join("\n");
@@ -1512,6 +2055,7 @@
 
     var roomName = "";
     var app = null;
+    var rollcallApp = null;
     var pollTimer = null;
 
     function showLandingStatus(message, type) {
@@ -1601,16 +2145,25 @@
       METRICS_CONFIG = normalizeMetricsConfig(data.metrics) || METRICS_CONFIG;
       dataState = data.stats && typeof data.stats === "object" ? data.stats : {};
       PERIODS = normalizePeriods(data.periods);
+      rollcallState = data.rollcall && typeof data.rollcall === "object" ? data.rollcall : {};
       roomName = data.name || "";
       renderRoomName();
 
       if (!app) {
-        app = initUploadAndSections();
+        var weekly = initUploadAndSections();
+        rollcallApp = initRollcallSection();
+        app = {
+          initSelect: function () { weekly.initSelect(); rollcallApp.initSelect(); },
+          renderAll: function () { weekly.renderAll(); rollcallApp.renderAll(); },
+          applyMetrics: function () { weekly.applyMetrics(); },
+          hasPendingWrites: function () { return weekly.hasPendingWrites() || rollcallApp.hasPendingWrites(); }
+        };
         initGroupsSettingsModal(app);
         initMetricsSettingsModal(app);
       } else {
         app.initSelect();
         app.applyMetrics();
+        rollcallApp.renderAll();
       }
     }
 
@@ -1624,9 +2177,11 @@
           METRICS_CONFIG = normalizeMetricsConfig(fresh.metrics) || METRICS_CONFIG;
           dataState = fresh.stats && typeof fresh.stats === "object" ? fresh.stats : {};
           PERIODS = normalizePeriods(fresh.periods);
+          rollcallState = fresh.rollcall && typeof fresh.rollcall === "object" ? fresh.rollcall : {};
           roomName = fresh.name || "";
           renderRoomName();
           if (app) app.applyMetrics();
+          if (rollcallApp) rollcallApp.renderAll();
         }).catch(function () {
           /* transient network hiccup - just try again next tick */
         });
@@ -1682,6 +2237,7 @@
   }
 
   function init() {
+    initTabs();
     initLandingAndRoom();
 
     if ("serviceWorker" in navigator) {
