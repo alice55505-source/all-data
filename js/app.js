@@ -64,6 +64,18 @@
   // (it guesses a single-byte codepage instead of UTF-8). Sniff the actual
   // bytes rather than trusting the file extension, and decode CSV text
   // ourselves first so SheetJS parses already-correct UTF-8.
+  // Blob.arrayBuffer() is missing on older iOS Safari (< 14); FileReader
+  // works everywhere.
+  function readFileAsArrayBuffer(file) {
+    if (file.arrayBuffer) return file.arrayBuffer();
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(reader.result); };
+      reader.onerror = function () { reject(reader.error || new Error("讀取檔案失敗")); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   function readWorkbook(buf) {
     var bytes = new Uint8Array(buf);
     var isZip = bytes.length > 2 && bytes[0] === 0x50 && bytes[1] === 0x4b;
@@ -505,7 +517,11 @@
       var ws = XLSX.utils.aoa_to_sheet(aoa);
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, cfg.summaryTitle);
-      XLSX.writeFile(wb, cfg.fileBaseName + ".xlsx");
+      try {
+        XLSX.writeFile(wb, cfg.fileBaseName + ".xlsx");
+      } catch (err) {
+        window.alert("下載失敗，請改用 Safari 或 Chrome 開啟本網站再試一次。");
+      }
     }
 
     initTableHeader();
@@ -660,7 +676,7 @@
       }
       els.parseBtn.disabled = true;
 
-      pickedFile.arrayBuffer().then(function (buf) {
+      readFileAsArrayBuffer(pickedFile).then(function (buf) {
         var workbook = readWorkbook(buf);
         var scan = scanWeeklyGrid(workbook);
         var childrenResult = deriveChildrenResult(scan);
@@ -1027,7 +1043,28 @@
     boot();
   }
 
+  // LINE / Facebook / Instagram in-app browsers on iPhone often can't pick
+  // or download files. LINE honours ?openExternalBrowser=1 and reopens the
+  // page in Safari; for the others show a hint to open it in Safari.
+  function escapeInAppBrowser() {
+    var ua = navigator.userAgent || "";
+    var params = new URLSearchParams(window.location.search);
+    if (/\bLine\//i.test(ua) && params.get("openExternalBrowser") !== "1") {
+      params.set("openExternalBrowser", "1");
+      window.location.replace(window.location.pathname + "?" + params.toString() + window.location.hash);
+      return true;
+    }
+    if (/FBAN|FBAV|Instagram|MicroMessenger/i.test(ua)) {
+      var bar = document.createElement("div");
+      bar.className = "inapp-hint";
+      bar.textContent = "目前在 App 內建瀏覽器開啟，可能無法上傳或下載檔案。請點右上角選單，改用 Safari／Chrome 開啟。";
+      document.body.insertBefore(bar, document.body.firstChild);
+    }
+    return false;
+  }
+
   function init() {
+    if (escapeInAppBrowser()) return;
     initTabs();
     initLandingAndRoom();
 

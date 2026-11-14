@@ -577,3 +577,11 @@ footer.app-footer {
   .summary-grid { grid-template-columns: 1fr; }
   thead th, tbody td { font-size: 0.82rem; }
 }
+
+.inapp-hint {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  text-align: center;
+}
