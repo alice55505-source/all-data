@@ -283,6 +283,25 @@
     });
   }
 
+  // Marks each congregation option as uploaded (✓) or not (未上傳) so the
+  // uploader can see at a glance which ones are still missing.
+  function markSelectOptions(select, state) {
+    Array.prototype.forEach.call(select.options, function (opt) {
+      if (!opt.value) return;
+      var done = Object.prototype.hasOwnProperty.call(state, opt.value);
+      opt.textContent = done ? "✓ " + opt.value : "　 " + opt.value + "（未上傳）";
+    });
+    Array.prototype.forEach.call(select.querySelectorAll("optgroup"), function (g) {
+      var opts = g.querySelectorAll("option");
+      var left = Array.prototype.filter.call(opts, function (o) {
+        return !Object.prototype.hasOwnProperty.call(state, o.value);
+      }).length;
+      var base = g.getAttribute("data-region") || g.label;
+      g.setAttribute("data-region", base);
+      g.label = left ? base + "（未上傳 " + left + "）" : base + "（已全部上傳）";
+    });
+  }
+
   function getRoomIdFromUrl() {
     var v = new URLSearchParams(window.location.search).get("room");
     return v ? v.trim().toUpperCase() : "";
@@ -1215,6 +1234,7 @@
     }
 
     function renderAll() {
+      markSelectOptions(els.select, dataState);
       // render() first: it prunes selections whose period was deleted.
       periodPanel.render(buildViews().noWeekly);
       statsSection.renderAll(buildViews().views, removeCongregation);
@@ -1701,6 +1721,7 @@
     }
 
     function renderAll() {
+      markSelectOptions(els.select, rollcallState);
       renderChecklist();
       renderGroupFilter();
       renderTable();
