@@ -16,7 +16,7 @@
     "主日", "禱告", "家聚會出訪", "家聚會受訪", "家聚會（出訪+受訪）",
     "小排", "晨興", "福音出訪", "生命讀經", "今年受浸", "召會生活"
   ];
-  var ROLE_OPTIONS = ["學齡前", "國小", "國中", "高中", "大學", "青職", "青壯", "中壯", "年長", "兒童"];
+  var ROLE_OPTIONS = ["學齡前", "國小", "國中", "高中", "大學", "青職", "青壯", "中壯", "年長", "兒童", "小計"];
   var EXTRA_OPTIONS = ["兒童主日"];
   var DEFAULT_METRICS_CONFIG = { meetings: [], roles: [], extras: [] };
 
@@ -52,7 +52,22 @@
     return role === "兒童" ? ["學齡前", "國小"] : [role];
   }
 
+  var ALL_REAL_ROLES = ["學齡前", "國小", "國中", "高中", "大學", "青職", "青壯", "中壯", "年長"];
+
   function meetingRoleValue(sums, meeting, role) {
+    if (role === "小計") {
+      // 「小計」= 全部群組：優先用報表自己的「小計」欄，沒有才把各群組相加。
+      var sub = 0;
+      resolveMeetings(meeting).forEach(function (m) {
+        var key = m + "|小計";
+        if (Object.prototype.hasOwnProperty.call(sums, key)) {
+          sub += sums[key] || 0;
+        } else {
+          ALL_REAL_ROLES.forEach(function (r) { sub += sums[m + "|" + r] || 0; });
+        }
+      });
+      return sub;
+    }
     var total = 0;
     resolveMeetings(meeting).forEach(function (m) {
       resolveRoles(role).forEach(function (r) {
